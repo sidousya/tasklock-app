@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TASKLOCK — 先送りできないToDo</title>
+<meta name="description" content="後回しを構造的に不可能にするタスク管理アプリ" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  html, body, #root { margin: 0; padding: 0; min-height: 100%; }
+  body { background: #EDE9DF; }
+</style>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+
+// ── TASKLOCK ─────────────────────────────────────────────
+// 後回しを構造的に不可能にするタスク管理。
+//  ・単発／毎日／曜日指定／週○回 の継続タスクに対応
+//  ・事前通知(朝の一斉／各タスク◯分前)を選べる → 達成率に影響しない
+//  ・期限を過ぎるとロック。完了 or 今日の別時刻に再設定でのみ解除
+//  ・一発達成率(直近10)で縛りが3段階に上下。ゼロにはならない。
+// ─────────────────────────────────────────────────────────
+
+const pad = (n) => String(n).padStart(2, "0");
+const now = () => new Date();
+const nowHM = () => { const d = now(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const dkey = (d = now()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const todayKey = () => dkey();
+const dow = (d = now()) => d.getDay(); // 0=日
+const minutesOf = (hm) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
+// 今週(月曜始まり)の、今日を含む残り日数
+const daysLeftInWeek = () => { const wd = dow(); const idx = wd === 0 ? 6 : wd - 1; return 7 - idx; };
+
+
+// ── 保存層(レベル1: 端末に保存) ──────────────────────────
+// Claudeのアーティファクト内ではlocalStorageが使えないため、
+// 使えない環境では自動でメモリ動作にフォールバックする。
+// 公開(Vercel等)すると保存が有効になる。
+const STORE_KEY = "tasklock_v1";
+const memStore = {};
+function storageAvailable() {
+  try { const k = "__t"; window.localStorage.setItem(k, "1"); window.localStorage.removeItem(k); return true; }
+  catch (e) { return false; }
+}
+const HAS_LS = typeof window !== "undefined" && storageAvailable();
+function loadState() {
+  try {
+    const raw = HAS_LS ? window.localStorage.getItem(STORE_KEY) : memStore[STORE_KEY];
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function saveState(obj) {
+  try {
+    const raw = JSON.stringify(obj);
+    if (HAS_LS) window.localStorage.setItem(STORE_KEY, raw);
+    else memStore[STORE_KEY] = raw;
+  } catch (e) {}
+}
+
+const WINDOW = 10;
+function calcLevel(history) {
+  const recent = history.slice(-WINDOW);
+  if (recent.length < 3) return 3;
+  const rate = recent.filter((h) => h.oneShot).length / recent.length;
+  if (rate >= 0.8) return 1;
+  if (rate >= 0.5) return 2;
+  return 3;
+}
+const LEVEL_LABEL = { 3: "GUARD Lv.3 きびしい", 2: "GUARD Lv.2 ふつう", 1: "GUARD Lv.1 ゆるい" };
+const LEVEL_DESC = { 3: "期限を過ぎると、音つきの全画面ロック。", 2: "期限を過ぎると、静かな全画面警告（音なし）。", 1: "期限を過ぎても、画面上部に警告が出るだけ。" };
+const WD = ["日", "月", "火", "水", "木", "金", "土"];
+
+// タスクが「今日やるべき対象か」を判定
+function isDueToday(t, weekProgress) {
+  if (t.type === "single") return t.date === todayKey();
+  if (t.type === "daily") return true;
+  if (t.type === "weekday") return t.days.includes(dow());
+  if (t.type === "weekly") {
+    const doneThisWeek = weekProgress[t.id] || 0;
+    if (doneThisWeek >= t.count) return false;      // 今週ノルマ達成済み
+    const remaining = t.count - doneThisWeek;
+    return remaining >= daysLeftInWeek();            // 残り日数が足りない→毎日催促
+    // (それ以外の日は任意なので、対象=催促はしないが下で「任意」表示)
+  }
+  return false;
+}
+// 週○回で「今日は任意でやれる日」か
+function isOptionalWeekly(t, weekProgress) {
+  if (t.type !== "weekly") return false;
+  const done = weekProgress[t.id] || 0;
+  if (done >= t.count) return false;
+  return (t.count - done) < daysLeftInWeek();
+}
+
+function TaskLock() {
+  const saved = loadState();
+  const [tasks, setTasks] = useState(saved?.tasks ?? [
+    { id: 1, title: "英単語を30個おぼえる", time: "21:00", type: "daily" },
+    { id: 2, title: "ジムに行く", time: "19:00", type: "weekly", count: 3 },
+  ]);
+  // その日に完了/再設定した記録: doneToday[dateKey] = { taskId: {done, rescheduled} }
+  const [doneMap, setDoneMap] = useState(saved?.doneMap ?? {});           // {`${date}:${id}`: true}
+  const [reschedMap, setReschedMap] = useState(saved?.reschedMap ?? {});     // {`${date}:${id}`: newTime}
+  const [weekProgress, setWeekProgress] = useState(saved?.weekProgress ?? {}); // {taskId: 今週の完了回数}
+  const [history, setHistory] = useState(saved?.history ?? []);
+
+  const [newTitle, setNewTitle] = useState("");
+  const [newTime, setNewTime] = useState("21:00");
+  const [newType, setNewType] = useState("daily"); // single/daily/weekday/weekly
+  const [newDays, setNewDays] = useState([1, 3, 5]);
+  const [newCount, setNewCount] = useState(3);
+
+  const [morningOn, setMorningOn] = useState(saved?.morningOn ?? true);
+  const [morningTime, setMorningTime] = useState(saved?.morningTime ?? "07:00");
+  const [beforeMin, setBeforeMin] = useState(saved?.beforeMin ?? 30);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const firedRef = useRef(new Set());
+  const [notices, setNotices] = useState([]);
+  const [reTime, setReTime] = useState("");
+  const [, setTick] = useState(0);
+  const alarmRef = useRef(null);
+
+  const level = calcLevel(history);
+
+  // 変更を端末に保存
+  useEffect(() => {
+    saveState({ tasks, doneMap, reschedMap, weekProgress, history, morningOn, morningTime, beforeMin });
+  }, [tasks, doneMap, reschedMap, weekProgress, history, morningOn, morningTime, beforeMin]);
+  useEffect(() => { const iv = setInterval(() => setTick((t) => t + 1), 1000); return () => clearInterval(iv); }, []);
+
+  const tkey = (id) => `${todayKey()}:${id}`;
+  const isDone = (id) => !!doneMap[tkey(id)];
+  const isResched = (id) => !!reschedMap[tkey(id)];
+  const effTime = (t) => reschedMap[tkey(t.id)] || t.time;
+
+  // 今日出すべきタスク(必須) + 任意(週○回で自由な日)
+  const required = tasks.filter((t) => isDueToday(t, weekProgress) && !isDone(t.id));
+  const optional = tasks.filter((t) => isOptionalWeekly(t, weekProgress) && !isDone(t.id) && !isDueToday(t, weekProgress));
+
+  const overdue = required.find((t) => nowHM() >= effTime(t));
+  const locked = level >= 2 ? overdue : null;
+
+  const oneShotRate = (() => { const r = history.slice(-WINDOW); if (!r.length) return null; return Math.round((r.filter((h) => h.oneShot).length / r.length) * 100); })();
+
+  // 事前通知
+  useEffect(() => {
+    const cur = minutesOf(nowHM()); const fired = firedRef.current;
+    const push = (key, text) => { if (!fired.has(key)) { fired.add(key); setNotices((n) => [...n, { id: key, text }]); } };
+    if (morningOn) {
+      const key = `morning-${todayKey()}`;
+      if (nowHM() >= morningTime && !fired.has(key)) {
+        const list = [...required, ...optional];
+        if (list.length) push(key, `おはようございます。今日やること ${required.length}件${optional.length ? `（＋任意${optional.length}件）` : ""}：${list.map((t) => t.title).join(" / ")}`);
+        else fired.add(key);
+      }
+    }
+    if (beforeMin > 0) {
+      required.forEach((t) => {
+        const lead = minutesOf(effTime(t)) - beforeMin; const key = `pre-${t.id}-${effTime(t)}-${todayKey()}`;
+        if (cur >= lead && cur < minutesOf(effTime(t))) push(key, `まもなく「${t.title}」の時間です（${effTime(t)}／あと${minutesOf(effTime(t)) - cur}分）`);
+      });
+    }
+  });
+  const dismissNotice = (id) => setNotices((n) => n.filter((x) => x.id !== id));
+
+  useEffect(() => {
+    if (locked && level >= 3) {
+      try { const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const beep = () => { const o = ctx.createOscillator(); const g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.value = 0.04; o.start(); o.stop(ctx.currentTime + 0.15); };
+        beep(); alarmRef.current = setInterval(beep, 1200); return () => clearInterval(alarmRef.current);
+      } catch (e) {}
+    }
+  });
+
+  const addTask = () => {
+    if (!newTitle.trim()) return;
+    const base = { id: Date.now(), title: newTitle.trim(), time: newTime, type: newType };
+    if (newType === "single") base.date = todayKey();
+    if (newType === "weekday") base.days = [...newDays].sort();
+    if (newType === "weekly") base.count = newCount;
+    setTasks([...tasks, base]); setNewTitle("");
+  };
+
+  const completeTask = (t) => {
+    setDoneMap((m) => ({ ...m, [tkey(t.id)]: true }));
+    if (t.type === "weekly") setWeekProgress((w) => ({ ...w, [t.id]: (w[t.id] || 0) + 1 }));
+    setHistory((h) => [...h, { oneShot: !isResched(t.id) }]);
+  };
+  const reschedule = (t) => {
+    if (!reTime || reTime <= nowHM()) return;
+    setReschedMap((m) => ({ ...m, [tkey(t.id)]: reTime })); setReTime("");
+  };
+
+  const C = { ink: "#14140F", paper: "#EDE9DF", accent: "#C6462E", warn2: "#B98A2E", ok: "#2E6E4E", dim: "#6B675C", note: "#3B5BA5" };
+  const mono = "'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace";
+  const disp = "'Archivo', system-ui, sans-serif";
+
+  const freqLabel = (t) => {
+    if (t.type === "single") return "単発";
+    if (t.type === "daily") return "毎日";
+    if (t.type === "weekday") return t.days.map((d) => WD[d]).join("・");
+    if (t.type === "weekly") { const done = weekProgress[t.id] || 0; return `週${t.count}回（今週 ${done}/${t.count}）`; }
+    return "";
+  };
+
+  if (locked) {
+    const bg = level >= 3 ? C.accent : C.ink;
+    return (
+      <div style={{ minHeight: "100vh", background: bg, color: C.paper, fontFamily: disp, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }}>
+        <div style={{ fontFamily: mono, letterSpacing: 4, fontSize: 13, textTransform: "uppercase", opacity: 0.9 }}>Time's up</div>
+        <div style={{ fontSize: 13, fontFamily: mono, marginTop: 8, opacity: 0.85 }}>予定時刻 {effTime(locked)} を過ぎました</div>
+        <h1 style={{ fontSize: "min(9vw, 40px)", fontWeight: 800, lineHeight: 1.1, margin: "18px 0 8px", maxWidth: 640 }}>{locked.title}</h1>
+        <p style={{ maxWidth: 420, fontSize: 15, lineHeight: 1.6, opacity: 0.92 }}>終わらせるか、<b>今日のうちの別の時刻に再設定</b>するまで消えません。明日には送れません。</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 26, width: "min(90vw, 360px)" }}>
+          <button onClick={() => completeTask(locked)} style={{ background: C.paper, color: C.ink, border: "none", padding: "16px", fontSize: 16, fontWeight: 800, fontFamily: disp, cursor: "pointer" }}>今やった。完了にする</button>
+          <div style={{ borderTop: `1px solid rgba(237,233,223,0.4)`, paddingTop: 14 }}>
+            <div style={{ fontFamily: mono, fontSize: 12, letterSpacing: 1, marginBottom: 8, opacity: 0.9 }}>今日の何時にやる？（{nowHM()} より後）</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="time" value={reTime} onChange={(e) => setReTime(e.target.value)} style={{ flex: 1, padding: "12px", fontSize: 16, fontFamily: mono, border: "none", background: "rgba(237,233,223,0.15)", color: C.paper }} />
+              <button onClick={() => reschedule(locked)} disabled={!reTime || reTime <= nowHM()} style={{ background: reTime && reTime > nowHM() ? C.paper : "rgba(237,233,223,0.3)", color: C.ink, border: "none", padding: "0 18px", fontSize: 14, fontWeight: 700, fontFamily: disp, cursor: reTime && reTime > nowHM() ? "pointer" : "not-allowed" }}>再設定</button>
+            </div>
+          </div>
+        </div>
+        <div style={{ fontFamily: mono, fontSize: 11, opacity: 0.7, marginTop: 22 }}>{LEVEL_LABEL[level]}</div>
+      </div>
+    );
+  }
+
+  const renderTask = (t, isOpt) => (
+    <li key={t.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 4px", borderBottom: `1px solid rgba(20,20,15,0.15)`, opacity: isOpt ? 0.7 : 1 }}>
+      <button onClick={() => completeTask(t)} aria-label="完了" style={{ width: 24, height: 24, flexShrink: 0, border: `2px solid ${C.ink}`, background: "transparent", cursor: "pointer" }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>{t.title}</div>
+        <div style={{ fontFamily: mono, fontSize: 12, color: C.dim, marginTop: 2 }}>
+          {isOpt ? "任意・" : `期限 ${effTime(t)}・`}{freqLabel(t)}{isResched(t.id) ? "・再設定済" : ""}
+        </div>
+      </div>
+      {isOpt && <span style={{ fontFamily: mono, fontSize: 11, color: C.note }}>今日やってもOK</span>}
+    </li>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.paper, color: C.ink, fontFamily: disp, padding: "0 20px 60px" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+        {notices.map((n) => (
+          <div key={n.id} style={{ background: C.note, color: C.paper, padding: "12px 14px", fontFamily: mono, fontSize: 13, lineHeight: 1.5, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginTop: 8 }}>
+            <span>🔔 {n.text}</span>
+            <button onClick={() => dismissNotice(n.id)} aria-label="閉じる" style={{ background: "transparent", border: "none", color: C.paper, cursor: "pointer", fontSize: 18, lineHeight: 1, flexShrink: 0 }}>×</button>
+          </div>
+        ))}
+        {overdue && level === 1 && (
+          <div style={{ background: C.warn2, color: C.paper, padding: "12px 16px", fontFamily: mono, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+            <span>「{overdue.title}」が期限切れです（{effTime(overdue)}）</span>
+            <button onClick={() => completeTask(overdue)} style={{ background: C.paper, color: C.ink, border: "none", padding: "6px 12px", fontWeight: 700, fontFamily: disp, cursor: "pointer", fontSize: 13 }}>完了</button>
+          </div>
+        )}
+
+        <header style={{ borderBottom: `2px solid ${C.ink}`, padding: "28px 0 16px", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontFamily: disp, fontWeight: 800, fontSize: 26, letterSpacing: -0.5 }}>TASKLOCK</div>
+            <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 2, color: C.dim, textTransform: "uppercase", marginTop: 2 }}>先送りできないToDo</div>
+          </div>
+          <button onClick={() => setShowSettings((s) => !s)} style={{ background: "transparent", border: `1.5px solid ${C.ink}`, color: C.ink, fontFamily: mono, fontSize: 12, padding: "8px 12px", cursor: "pointer" }}>通知設定</button>
+        </header>
+
+        {showSettings && (
+          <div style={{ border: `1.5px solid ${C.ink}`, padding: "16px", marginTop: 16, fontFamily: mono, fontSize: 13 }}>
+            <div style={{ fontWeight: 700, marginBottom: 14, fontFamily: disp, fontSize: 15 }}>事前通知（達成率には影響しません）</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, paddingBottom: 12, borderBottom: `1px solid rgba(20,20,15,0.2)`, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={morningOn} onChange={(e) => setMorningOn(e.target.checked)} />朝の一斉通知</label>
+              <input type="time" value={morningTime} onChange={(e) => setMorningTime(e.target.value)} disabled={!morningOn} style={{ padding: "8px", fontFamily: mono, border: `1.5px solid ${C.ink}`, background: morningOn ? "transparent" : "rgba(0,0,0,0.05)", color: C.ink }} />
+            </div>
+            <div style={{ paddingTop: 12 }}>
+              <div style={{ marginBottom: 8 }}>各タスクの何分前に知らせる？</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[0, 15, 30, 60].map((m) => (<button key={m} onClick={() => setBeforeMin(m)} style={{ padding: "8px 14px", fontFamily: mono, fontSize: 13, border: `1.5px solid ${C.ink}`, cursor: "pointer", background: beforeMin === m ? C.ink : "transparent", color: beforeMin === m ? C.paper : C.ink }}>{m === 0 ? "オフ" : `${m}分前`}</button>))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: `2px solid ${C.ink}`, marginTop: 16 }}>
+          <div style={{ padding: "18px 0", borderRight: `1px solid ${C.ink}` }}>
+            <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 1, color: C.dim, textTransform: "uppercase" }}>一発達成率<span style={{ textTransform: "none" }}>（直近{WINDOW}）</span></div>
+            <div style={{ fontFamily: disp, fontSize: 40, fontWeight: 800, lineHeight: 1, color: oneShotRate === null ? C.dim : oneShotRate >= 80 ? C.ok : C.ink }}>{oneShotRate === null ? "–" : oneShotRate}<span style={{ fontSize: 15, fontWeight: 600, color: C.dim }}> %</span></div>
+          </div>
+          <div style={{ padding: "18px 0 18px 18px" }}>
+            <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 1, color: C.dim, textTransform: "uppercase" }}>ガードレベル</div>
+            <div style={{ fontFamily: disp, fontSize: 40, fontWeight: 800, lineHeight: 1, color: level === 1 ? C.ok : level === 3 ? C.accent : C.warn2 }}>{level}</div>
+          </div>
+        </div>
+        <div style={{ fontFamily: mono, fontSize: 12, color: C.dim, padding: "10px 0", borderBottom: `1px solid ${C.ink}` }}>{LEVEL_LABEL[level]} — {LEVEL_DESC[level]}</div>
+
+        {/* 追加フォーム */}
+        <div style={{ padding: "18px 0", borderBottom: `1px solid ${C.ink}` }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTask()} placeholder="やること" style={{ flex: 1, padding: "12px", fontSize: 15, fontFamily: disp, border: `1.5px solid ${C.ink}`, background: "transparent", color: C.ink }} />
+            <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} style={{ width: 108, padding: "12px", fontSize: 15, fontFamily: mono, border: `1.5px solid ${C.ink}`, background: "transparent", color: C.ink }} />
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {[["single", "単発"], ["daily", "毎日"], ["weekday", "曜日指定"], ["weekly", "週○回"]].map(([v, l]) => (
+              <button key={v} onClick={() => setNewType(v)} style={{ padding: "8px 14px", fontFamily: mono, fontSize: 13, border: `1.5px solid ${C.ink}`, cursor: "pointer", background: newType === v ? C.ink : "transparent", color: newType === v ? C.paper : C.ink }}>{l}</button>
+            ))}
+          </div>
+          {newType === "weekday" && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {WD.map((w, i) => (<button key={i} onClick={() => setNewDays((ds) => ds.includes(i) ? ds.filter((x) => x !== i) : [...ds, i])} style={{ width: 40, padding: "8px 0", fontFamily: mono, fontSize: 13, border: `1.5px solid ${C.ink}`, cursor: "pointer", background: newDays.includes(i) ? C.ink : "transparent", color: newDays.includes(i) ? C.paper : C.ink }}>{w}</button>))}
+            </div>
+          )}
+          {newType === "weekly" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: mono, fontSize: 14, marginBottom: 10 }}>
+              週<select value={newCount} onChange={(e) => setNewCount(Number(e.target.value))} style={{ padding: "8px", fontFamily: mono, border: `1.5px solid ${C.ink}`, background: "transparent" }}>{[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select>回
+            </div>
+          )}
+          <button onClick={addTask} style={{ width: "100%", background: C.ink, color: C.paper, border: "none", padding: "12px", fontSize: 15, fontWeight: 700, fontFamily: disp, cursor: "pointer" }}>追加する</button>
+        </div>
+
+        {/* 必須タスク */}
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {required.map((t) => renderTask(t, false))}
+          {required.length === 0 && (<li style={{ padding: "40px 4px", textAlign: "center", color: C.dim, fontFamily: mono, fontSize: 13 }}>今日やるべき必須タスクはありません。</li>)}
+        </ul>
+
+        {/* 任意(週○回でまだ余裕がある日) */}
+        {optional.length > 0 && (
+          <>
+            <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: 1, color: C.dim, textTransform: "uppercase", padding: "18px 0 4px", borderTop: `1px solid ${C.ink}`, marginTop: 8 }}>今日は任意（やると先が楽）</div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>{optional.map((t) => renderTask(t, true))}</ul>
+          </>
+        )}
+
+        <p style={{ fontFamily: mono, fontSize: 11, color: C.dim, marginTop: 28, lineHeight: 1.7 }}>
+          RULE — 週○回タスクは、やる日を自由に選べます。ただし残り日数がノルマに足りなくなると「必須」に切り替わり、毎日ロックの対象になります。継続タスクは完了すると消え、次の該当日にまた出ます。
+          {" "}記録はこの端末に保存されます{HAS_LS ? "" : "（※このプレビューでは保存は無効。公開すると有効になります）"}。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<TaskLock />);
+</script>
+</body>
+</html>
