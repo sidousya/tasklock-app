@@ -372,8 +372,10 @@ function nowHM(){const n=new Date();return n.getHours()*60+n.getMinutes();}
 function hm2min(t){const p=t.split(":");return (+p[0])*60+(+p[1]);}
 
 /* ================= task logic ================= */
+function effTime(t,dateStr){return (t.override&&t.override[dateStr])||t.time;}
+function onceDone(t){return !!(t.done&&Object.keys(t.done).length);}
 function dueOn(t,dateStr){
-  if(t.type==="once")return t.date===dateStr;
+  if(t.type==="once")return !onceDone(t) && dateStr>=t.date && dateStr<=today();
   if(t.type==="daily")return dateStr>=t.createdAt;
   if(t.type==="week")return dateStr>=t.createdAt && t.days.includes(weekdayOf(dateStr));
   if(t.type==="count"){
@@ -385,6 +387,16 @@ function dueOn(t,dateStr){
     return doneThisWeek < t.count || (t.done&&t.done[dateStr]);
   }
   return false;
+}
+// 週◯回：残り日数と残り回数が並んだ日（＝毎日やらないと届かない）からロック。それ以前は通知のみ。
+function countCritical(t,dateStr){
+  const ws=weekStart(dateStr);
+  let done=0;for(let i=0;i<7;i++){if(t.done&&t.done[addDays(ws,i)])done++;}
+  const remaining=t.count-done;
+  if(remaining<=0)return false;
+  const idx=(weekdayOf(dateStr)+6)%7; // Mon=0..Sun=6
+  const daysLeft=7-idx;              // 今日〜日曜(含む)
+  return remaining>=daysLeft;
 }
 function isDone(t,dateStr){return !!(t.done&&t.done[dateStr]);}
 function tasksDue(dateStr){return S.tasks.filter(t=>dueOn(t,dateStr));}
@@ -444,6 +456,8 @@ function addTask(){
   if(addType==="count"){t.count=Math.max(1,Math.min(7,+document.getElementById("addCount").value||3));}
   S.tasks.push(t);save();
   document.getElementById("addText").value="";
+  pickDays=[];
+  document.querySelectorAll("#daysPick button").forEach(b=>b.classList.remove("on"));
   burstToast("追加した");
   renderAll();
 }
@@ -464,7 +478,7 @@ function taskLI(t,dateStr,over){
   chk.onclick=()=>toggle(t,dateStr);
   const body=document.createElement("div");body.className="t-body";
   body.innerHTML='<div class="t-name"></div><div class="t-meta">'
-    +'<span class="tm-time">'+t.time+'</span>'
+    +'<span class="tm-time">'+effTime(t,dateStr)+'</span>'
     +'<span class="badge">'+typeLabel(t)+'</span>'
     +(over?'<span class="badge" style="color:var(--danger);border-color:rgba(255,77,77,.4)">締切超過</span>':'')
     +'</div>';
@@ -478,11 +492,11 @@ function taskLI(t,dateStr,over){
 function renderToday(){
   const list=document.getElementById("todayList");list.innerHTML="";
   const day=today();
-  const due=tasksDue(day).sort((a,b)=>hm2min(a.time)-hm2min(b.time));
+  const due=tasksDue(day).sort((a,b)=>hm2min(effTime(a,day))-hm2min(effTime(b,day)));
   if(!due.length){list.innerHTML='<div class="empty">今日のタスクはまだありません。下から追加できます。</div>';return;}
   const nm=nowHM();
   due.forEach(t=>{
-    const over=!isDone(t,day)&&hm2min(t.time)<nm;
+    const over=!isDone(t,day)&&hm2min(effTime(t,day))<nm&&(t.type!=="count"||countCritical(t,day));
     list.appendChild(taskLI(t,day,over));
   });
 }
@@ -545,7 +559,7 @@ function renderCalList(){
   const t=document.getElementById("calSelTitle");const list=document.getElementById("calList");list.innerHTML="";
   if(!calSel){t.textContent="日付を選ぶと、その日のタスクが出ます";return;}
   t.textContent=calSel+" のタスク";
-  const due=tasksDue(calSel).sort((a,b)=>hm2min(a.time)-hm2min(b.time));
+  const due=tasksDue(calSel).sort((a,b)=>hm2min(effTime(a,calSel))-hm2min(effTime(b,calSel)));
   if(!due.length){list.innerHTML='<div class="empty">この日のタスクはありません</div>';return;}
   due.forEach(x=>list.appendChild(taskLI(x,calSel,false)));
 }
@@ -556,8 +570,8 @@ function renderAll(){renderToday();renderFire();renderSettings();renderCal();ren
 let lockTaskRef=null;
 function overdueTasks(){
   const day=today();const nm=nowHM();
-  return tasksDue(day).filter(t=>!isDone(t,day)&&hm2min(t.time)<=nm)
-    .sort((a,b)=>hm2min(a.time)-hm2min(b.time));
+  return tasksDue(day).filter(t=>!isDone(t,day)&&hm2min(effTime(t,day))<=nm&&(t.type!=="count"||countCritical(t,day)))
+    .sort((a,b)=>hm2min(effTime(a,day))-hm2min(effTime(b,day)));
 }
 function updateLock(){
   if(S.guard===3){hideLock();return;} // ゆるめ = 通知のみ
@@ -587,9 +601,10 @@ function doDelay(min){
   stopAlarmLoop();
   const dl=delayState();
   const proceed=(reason)=>{
-    // push deadline forward
-    const nm=Math.min(23*60+59, hm2min(t.time)+min);
-    t.time=String(Math.floor(nm/60)).padStart(2,"0")+":"+String(nm%60).padStart(2,"0");
+    // 当日だけ後ろ倒し（繰り返しタスクの元の時刻は変えない）
+    const nm=Math.min(23*60+59, hm2min(effTime(t,today()))+min);
+    if(!t.override)t.override={};
+    t.override[today()]=String(Math.floor(nm/60)).padStart(2,"0")+":"+String(nm%60).padStart(2,"0");
     dl.count++;save();
     burstToast("後ろ倒し +"+min+"分"+(reason?"（"+reason+"）":""));
     renderAll();
@@ -644,12 +659,13 @@ function checkNotify(){
   tasksDue(day).forEach(t=>{
     if(isDone(t,day))return;
     S.notify.forEach(mins=>{
-      const at=hm2min(t.time)-mins;
+      const et=effTime(t,day);
+      const at=hm2min(et)-mins;
       const key=day+"_"+t.id+"_"+mins;
       if(nm>=at && nm<at+1 && !notified[key]){
         notified[key]=true;
         playAlert();
-        try{new Notification("TASKLOCK",{body:t.text+" が "+mins+"分後（"+t.time+"）に締切です"});}catch(e){}
+        try{new Notification("TASKLOCK",{body:t.text+" が "+mins+"分後（"+et+"）に締切です"});}catch(e){}
       }
     });
   });
