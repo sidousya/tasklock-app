@@ -292,6 +292,22 @@
       <button class="mini" id="notifyPerm" style="width:100%;margin-top:10px">端末の通知を許可する</button>
     </div>
 
+    <div class="sec-title">アラート音</div>
+    <div class="panel">
+      <p>締切ロックと通知で鳴らす音・音量。試聴で確認できます。</p>
+      <div class="seg" id="soundPick">
+        <button data-s="pipi">ピピッ</button><button data-s="alarm">アラーム</button>
+        <button data-s="chime">チャイム</button><button data-s="siren">サイレン</button>
+        <button data-s="buzzer">ブザー</button><button data-s="none">なし</button>
+      </div>
+      <div class="row" style="align-items:center;gap:10px;margin-top:10px">
+        <span class="hint" style="flex:0 0 auto;margin:0">音量</span>
+        <input type="range" id="volRange" min="0" max="100" step="5" style="flex:1;accent-color:var(--fire)" />
+        <span class="hint num" id="volVal" style="flex:0 0 auto;margin:0;min-width:40px;text-align:right"></span>
+      </div>
+      <button class="mini" id="soundTest" style="width:100%;margin-top:10px">🔊 試聴</button>
+    </div>
+
     <div class="sec-title">データ</div>
     <div class="panel">
       <p>すべての記録はこの端末にだけ保存されます。</p>
@@ -337,7 +353,7 @@ function flameSVG(){
 /* ================= state ================= */
 const KEY="tasklock_v2";
 const DEFAULT={tasks:[],points:0,total:0,guard:2,notify:[10],best:0,
-  delay:{date:"",count:0},lastSeen:""};
+  sound:"pipi",volume:70,delay:{date:"",count:0},lastSeen:""};
 let S=load();
 
 function load(){
@@ -494,6 +510,9 @@ function renderSettings(){
   document.querySelectorAll("#guardPick button").forEach(b=>b.classList.toggle("on",+b.dataset.g===S.guard));
   document.querySelectorAll("#notifyPreset button").forEach(b=>b.classList.toggle("on",S.notify.includes(+b.dataset.n)));
   document.getElementById("notifyList").textContent = S.notify.length?("通知: "+S.notify.slice().sort((a,b)=>a-b).map(n=>n+"分前").join(" / ")):"通知オフ";
+  document.querySelectorAll("#soundPick button").forEach(b=>b.classList.toggle("on",b.dataset.s===S.sound));
+  const vr=document.getElementById("volRange");if(vr)vr.value=S.volume;
+  const vv=document.getElementById("volVal");if(vv)vv.textContent=S.volume+"%";
 }
 
 /* ---- calendar ---- */
@@ -556,15 +575,16 @@ function showLock(t){
   if(dl.count===0)note.innerHTML='後ろ倒しは<b>1日1回まで無料</b>';
   else note.innerHTML='本日の無料分は使用済み。<b>広告を見る</b>か<b>'+DELAY_PTS+'ptで免除</b>';
   document.getElementById("lock").classList.add("show");
-  beep();
+  startAlarmLoop();
 }
-function hideLock(){document.getElementById("lock").classList.remove("show");lockTaskRef=null;}
+function hideLock(){stopAlarmLoop();document.getElementById("lock").classList.remove("show");lockTaskRef=null;}
 function hideLockIfClear(){if(!overdueTasks().length)hideLock();else updateLock();}
 
 const DELAY_PTS=50;
 function delayState(){if(S.delay.date!==today())S.delay={date:today(),count:0};return S.delay;}
 function doDelay(min){
   const t=S.tasks.find(x=>x.id===lockTaskRef);if(!t)return;
+  stopAlarmLoop();
   const dl=delayState();
   const proceed=(reason)=>{
     // push deadline forward
@@ -588,23 +608,24 @@ function showAd(cb){
   setTimeout(()=>{burstToast("広告おわり");cb();},1500);
 }
 
-/* ---- beep (WebAudio) ---- */
+/* ---- alert sounds (WebAudio, no files) ---- */
 let AC=null;
-function beep(){
-  try{
-    AC=AC||new (window.AudioContext||window.webkitAudioContext)();
-    if(AC.state==="suspended")AC.resume();
-    [0,0.28].forEach(off=>{
-      const o=AC.createOscillator(),g=AC.createGain();
-      o.type="square";o.frequency.value=880;
-      o.connect(g);g.connect(AC.destination);
-      const t0=AC.currentTime+off;
-      g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(0.12,t0+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
-      o.start(t0);o.stop(t0+0.24);
-    });
-  }catch(e){}
-}
+function ac(){AC=AC||new (window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume();return AC;}
+function unlockAudio(){try{ac();}catch(e){}}
+function tone(freq,type,t0off,t1off,vol){const a=ac();const o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.value=freq;o.connect(g);g.connect(a.destination);const s=a.currentTime+t0off,e=a.currentTime+t1off;g.gain.setValueAtTime(0.0001,s);g.gain.exponentialRampToValueAtTime(Math.max(0.0002,vol),s+0.02);g.gain.exponentialRampToValueAtTime(0.0001,e);o.start(s);o.stop(e+0.03);}
+function sweep(f0,f1,t0off,t1off,vol){const a=ac();const o=a.createOscillator(),g=a.createGain();o.type="sine";o.connect(g);g.connect(a.destination);const s=a.currentTime+t0off,e=a.currentTime+t1off;o.frequency.setValueAtTime(f0,s);o.frequency.linearRampToValueAtTime(f1,e);g.gain.setValueAtTime(0.0001,s);g.gain.exponentialRampToValueAtTime(Math.max(0.0002,vol),s+0.03);g.gain.exponentialRampToValueAtTime(0.0001,e);o.start(s);o.stop(e+0.03);}
+const SOUNDS={
+  pipi:{name:"ピピッ",play(v){tone(880,"square",0,0.22,v);tone(880,"square",0.28,0.5,v);}},
+  alarm:{name:"アラーム",play(v){[0,0.18,0.36].forEach(o=>tone(1000,"square",o,o+0.12,v));}},
+  chime:{name:"チャイム",play(v){tone(660,"sine",0,0.4,v);tone(880,"sine",0.18,0.7,v);}},
+  siren:{name:"サイレン",play(v){sweep(500,1050,0,0.5,v);sweep(1050,500,0.5,1.0,v);}},
+  buzzer:{name:"ブザー",play(v){tone(220,"sawtooth",0,0.6,v);}},
+  none:{name:"なし",play(){}}
+};
+function playAlert(){try{const v=(S.volume||0)/100*0.4;if(v<=0)return;(SOUNDS[S.sound]||SOUNDS.pipi).play(v);}catch(e){}}
+let alarmTimer=null;
+function startAlarmLoop(){stopAlarmLoop();if(S.sound==="none"||(S.volume||0)<=0)return;playAlert();alarmTimer=setInterval(playAlert,1300);}
+function stopAlarmLoop(){if(alarmTimer){clearInterval(alarmTimer);alarmTimer=null;}}
 
 /* ================= toast ================= */
 let toastT=null;
@@ -627,6 +648,7 @@ function checkNotify(){
       const key=day+"_"+t.id+"_"+mins;
       if(nm>=at && nm<at+1 && !notified[key]){
         notified[key]=true;
+        playAlert();
         try{new Notification("TASKLOCK",{body:t.text+" が "+mins+"分後（"+t.time+"）に締切です"});}catch(e){}
       }
     });
@@ -686,6 +708,14 @@ function init(){
   };
   document.getElementById("notifyPerm").onclick=requestPerm;
 
+  // alert sound
+  document.addEventListener("pointerdown",unlockAudio,{once:true});
+  document.querySelectorAll("#soundPick button").forEach(b=>b.onclick=()=>{S.sound=b.dataset.s;save();renderSettings();if(S.sound!=="none")playAlert();});
+  const vr=document.getElementById("volRange");
+  vr.addEventListener("input",e=>{S.volume=+e.target.value;document.getElementById("volVal").textContent=S.volume+"%";});
+  vr.addEventListener("change",e=>{S.volume=+e.target.value;save();playAlert();});
+  document.getElementById("soundTest").onclick=playAlert;
+
   // reset
   document.getElementById("resetBtn").onclick=()=>{
     if(confirm("すべての記録を消します。元に戻せません。よろしいですか？")){
@@ -693,7 +723,7 @@ function init(){
   };
 
   // lock actions
-  document.getElementById("lockDone").onclick=()=>{const t=S.tasks.find(x=>x.id===lockTaskRef);if(t){toggle(t,today());}};
+  document.getElementById("lockDone").onclick=()=>{stopAlarmLoop();const t=S.tasks.find(x=>x.id===lockTaskRef);if(t){toggle(t,today());}};
   document.querySelectorAll(".delayBtn").forEach(b=>b.onclick=()=>doDelay(+b.dataset.min));
 
   renderAll();
