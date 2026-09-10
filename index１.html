@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0d0e12" />
+<title>TASKLOCK — 先送りできないTODO</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0d0e12; --bg2:#111219; --surf:#16181f; --surf2:#1c1f28;
+    --line:#2a2d38; --line2:#363a48;
+    --ink:#ece9e2; --mut:#9a9ba6; --dim:#6d6f7b;
+    --fire:#ff6a1f; --fire-lt:#ffa23c; --fire-dp:#c53a00;
+    --ok:#37c46e; --danger:#ff4d4d;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(120% 60% at 50% -10%, rgba(255,106,31,.10), transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    font-family:"Zen Kaku Gothic New",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .wrap{max-width:520px;margin:0 auto;padding:0 16px 96px;}
+  .num{font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.02em}
+
+  /* ---------- header / fire ---------- */
+  header{
+    position:sticky;top:0;z-index:20;
+    background:linear-gradient(180deg, var(--bg) 70%, rgba(13,14,18,0));
+    padding:14px 0 10px;
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .logo{font-family:"Oswald";font-weight:700;font-size:20px;letter-spacing:.14em}
+  .brand .logo b{color:var(--fire)}
+  .brand .spacer{flex:1}
+  .icon-btn{
+    background:var(--surf);border:1px solid var(--line);color:var(--mut);
+    width:38px;height:38px;border-radius:11px;font-size:17px;cursor:pointer;
+    display:grid;place-items:center;transition:.15s;
+  }
+  .icon-btn:hover{border-color:var(--line2);color:var(--ink)}
+
+  .fire-bar{
+    margin-top:12px;display:flex;align-items:center;gap:14px;
+    background:linear-gradient(180deg,var(--surf),var(--bg2));
+    border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;
+    position:relative;overflow:hidden;
+  }
+  .fire-bar::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(90% 120% at 14% 120%, rgba(255,106,31,.18), transparent 55%)}
+  .flame{width:56px;height:66px;flex:0 0 auto;filter:drop-shadow(0 0 10px rgba(255,106,31,.55));position:relative}
+  .flame svg{width:100%;height:100%;display:block;transition:transform .4s ease}
+  .flame.dead{filter:none;opacity:.5}
+  .fire-meta{display:flex;flex-direction:column;line-height:1.1;z-index:1}
+  .streak{display:flex;align-items:baseline;gap:6px}
+  .streak .d{font-family:"Oswald";font-weight:700;font-size:40px;color:var(--fire-lt);
+    text-shadow:0 0 18px rgba(255,106,31,.35)}
+  .streak .u{font-size:14px;color:var(--mut);font-weight:700}
+  .fire-sub{font-size:12px;color:var(--mut);margin-top:3px}
+  .fire-sub b{color:var(--fire-lt)}
+  .risk{color:var(--danger)!important;font-weight:700}
+
+  /* ---------- tabs ---------- */
+  .tabs{display:flex;gap:6px;margin:14px 0 10px}
+  .tab{flex:1;background:transparent;border:1px solid var(--line);color:var(--mut);
+    padding:9px 0;border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;transition:.15s;
+    font-family:inherit}
+  .tab.on{background:var(--surf2);border-color:var(--fire);color:var(--ink);
+    box-shadow:0 0 0 1px rgba(255,106,31,.25) inset}
+
+  /* ---------- tasks ---------- */
+  .sec-title{font-size:12px;color:var(--dim);font-weight:700;margin:16px 2px 8px;
+    letter-spacing:.04em}
+  ul.tasks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+  .task{
+    display:flex;align-items:center;gap:12px;
+    background:var(--surf);border:1px solid var(--line);border-radius:var(--r);
+    padding:12px 13px;transition:.15s;
+  }
+  .task.done{opacity:.55}
+  .task.overdue{border-color:rgba(255,77,77,.5);box-shadow:0 0 0 1px rgba(255,77,77,.15) inset}
+  .check{
+    width:26px;height:26px;flex:0 0 auto;border-radius:8px;border:2px solid var(--line2);
+    background:transparent;cursor:pointer;display:grid;place-items:center;color:transparent;
+    font-size:15px;transition:.15s;
+  }
+  .task.done .check{background:var(--ok);border-color:var(--ok);color:#06210f}
+  .t-body{flex:1;min-width:0}
+  .t-name{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .task.done .t-name{text-decoration:line-through}
+  .t-meta{font-size:11.5px;color:var(--mut);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}
+  .t-meta .tm-time{color:var(--fire-lt);font-family:"Oswald";font-weight:600}
+  .t-meta .badge{background:var(--surf2);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+  .t-del{background:transparent;border:none;color:var(--dim);font-size:18px;cursor:pointer;
+    padding:4px;line-height:1}
+  .t-del:hover{color:var(--danger)}
+  .empty{color:var(--dim);font-size:13px;text-align:center;padding:26px 0;border:1px dashed var(--line);
+    border-radius:var(--r)}
+
+  /* ---------- add form ---------- */
+  .add{background:var(--surf);border:1px solid var(--line);border-radius:var(--r);padding:13px;margin-top:10px}
+  .add input[type=text],.add input[type=time],.add input[type=number],.add select{
+    width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--ink);
+    border-radius:10px;padding:11px 12px;font-size:15px;font-family:inherit;outline:none}
+  .add input:focus,.add select:focus{border-color:var(--fire)}
+  .row{display:flex;gap:8px;margin-top:8px}
+  .row>*{flex:1;min-width:0}
+  .seg{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .seg button{flex:1 1 22%;background:var(--bg2);border:1px solid var(--line);color:var(--mut);
+    padding:9px 4px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+  .seg button.on{background:rgba(255,106,31,.14);border-color:var(--fire);color:var(--fire-lt)}
+  .days{display:flex;gap:5px;margin-top:8px}
+  .days button{flex:1;background:var(--bg2);border:1px solid var(--line);color:var(--mut);
+    padding:8px 0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+  .days button.on{background:rgba(255,106,31,.14);border-color:var(--fire);color:var(--fire-lt)}
+  .cta{width:100%;margin-top:10px;background:linear-gradient(180deg,var(--fire),var(--fire-dp));
+    border:none;color:#fff;font-weight:900;font-size:15px;padding:13px;border-radius:11px;cursor:pointer;
+    font-family:inherit;letter-spacing:.02em;box-shadow:0 6px 18px rgba(255,106,31,.28)}
+  .cta:active{transform:translateY(1px)}
+  .hint{font-size:11.5px;color:var(--dim);margin-top:7px}
+
+  /* ---------- calendar ---------- */
+  .cal-head{display:flex;align-items:center;justify-content:space-between;margin:6px 2px 10px}
+  .cal-head .m{font-family:"Oswald";font-weight:600;font-size:18px}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .cal-grid .wd{text-align:center;font-size:11px;color:var(--dim);padding:2px 0;font-weight:700}
+  .cell{aspect-ratio:1;border:1px solid var(--line);border-radius:9px;background:var(--surf);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;
+    font-family:"Oswald";font-weight:600;font-size:14px;color:var(--mut)}
+  .cell.pad{visibility:hidden}
+  .cell.today{border-color:var(--fire)}
+  .cell.sat{color:var(--ink)}
+  .cell .dot{position:absolute;bottom:6px;width:6px;height:6px;border-radius:50%}
+  .cell .dot.full{background:var(--ok)}
+  .cell .dot.part{background:var(--fire)}
+  .cell.sel{background:rgba(255,106,31,.16);border-color:var(--fire);color:var(--ink)}
+
+  /* ---------- settings ---------- */
+  .panel{background:var(--surf);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-top:10px}
+  .panel h3{margin:0 0 4px;font-size:14px}
+  .panel p{margin:0 0 10px;font-size:12px;color:var(--mut);line-height:1.5}
+  .guard{display:flex;gap:6px}
+  .guard button{flex:1;background:var(--bg2);border:1px solid var(--line);color:var(--mut);
+    padding:10px 4px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;line-height:1.3}
+  .guard button.on{background:rgba(255,106,31,.14);border-color:var(--fire);color:var(--fire-lt)}
+  .kv{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+  .kv:first-of-type{border-top:none}
+  .kv .k{font-size:13px}
+  .kv .v{font-family:"Oswald";font-weight:600;color:var(--fire-lt)}
+  .mini{background:var(--bg2);border:1px solid var(--line);color:var(--ink);border-radius:9px;
+    padding:8px 10px;font-size:13px;font-family:inherit;cursor:pointer}
+  .mini:hover{border-color:var(--line2)}
+
+  /* ---------- lock ---------- */
+  .lock{position:fixed;inset:0;z-index:100;display:none;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;padding:26px;
+    background:radial-gradient(120% 90% at 50% 0%, rgba(197,58,0,.5), rgba(9,9,12,.98) 60%), #08080b}
+  .lock.show{display:flex;animation:pop .25s ease}
+  @keyframes pop{from{opacity:0}to{opacity:1}}
+  .lock .lk-flame{width:74px;height:88px;filter:drop-shadow(0 0 16px rgba(255,106,31,.7));margin-bottom:14px}
+  .lock .lk-tag{font-size:12px;letter-spacing:.35em;color:var(--fire-lt);font-weight:700}
+  .lock .lk-title{font-family:"Oswald";font-weight:700;font-size:30px;margin:6px 0 2px}
+  .lock .lk-task{font-size:17px;color:var(--ink);margin:14px 0 4px;font-weight:700}
+  .lock .lk-time{font-family:"Oswald";color:var(--danger);font-size:15px}
+  .lock .lk-actions{margin-top:26px;width:100%;max-width:320px;display:flex;flex-direction:column;gap:10px}
+  .lock .done-btn{background:linear-gradient(180deg,var(--ok),#149248);border:none;color:#04180c;
+    font-weight:900;font-size:17px;padding:16px;border-radius:13px;cursor:pointer;font-family:inherit}
+  .lock .delay-row{display:flex;gap:8px}
+  .lock .delay-row button{flex:1;background:var(--surf2);border:1px solid var(--line2);color:var(--ink);
+    padding:12px 4px;border-radius:11px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px}
+  .lock .delay-row button:hover{border-color:var(--fire)}
+  .lock .lk-note{font-size:12px;color:var(--mut);margin-top:4px;min-height:16px}
+  .lock .lk-note b{color:var(--fire-lt)}
+
+  /* ---------- toast ---------- */
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:var(--surf2);border:1px solid var(--line2);color:var(--ink);padding:11px 16px;
+    border-radius:12px;font-size:13px;font-weight:700;opacity:0;transition:.25s;z-index:120;pointer-events:none;
+    box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">TASK<b>LOCK</b></div>
+      <div class="spacer"></div>
+      <button class="icon-btn" id="tabCalBtn" title="カレンダー">▦</button>
+      <button class="icon-btn" id="tabSetBtn" title="設定">⚙</button>
+    </div>
+
+    <div class="fire-bar">
+      <div class="flame" id="flame"></div>
+      <div class="fire-meta">
+        <div class="streak"><span class="d num" id="streakDays">0</span><span class="u">日連続</span></div>
+        <div class="fire-sub" id="fireSub">今日タスクを達成して火をつけよう</div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" data-tab="today">今日</button>
+      <button class="tab" data-tab="cal">カレンダー</button>
+      <button class="tab" data-tab="set">設定</button>
+    </div>
+  </header>
+
+  <!-- ===== TODAY ===== -->
+  <section id="view-today">
+    <div class="sec-title">今日のタスク</div>
+    <ul class="tasks" id="todayList"></ul>
+
+    <div class="sec-title">＋ タスクを追加</div>
+    <div class="add">
+      <input type="text" id="addText" placeholder="やること（例：英単語30個）" maxlength="40" />
+      <div class="row">
+        <input type="time" id="addTime" value="21:00" />
+      </div>
+      <div class="seg" id="typeSeg">
+        <button data-type="once" class="on">単発</button>
+        <button data-type="daily">毎日</button>
+        <button data-type="week">曜日</button>
+        <button data-type="count">週◯回</button>
+      </div>
+      <div class="days hide" id="daysPick">
+        <button data-d="1">月</button><button data-d="2">火</button><button data-d="3">水</button>
+        <button data-d="4">木</button><button data-d="5">金</button><button data-d="6">土</button><button data-d="0">日</button>
+      </div>
+      <div class="row hide" id="countPick">
+        <input type="number" id="addCount" value="3" min="1" max="7" /> 
+      </div>
+      <div class="hint hide" id="countHint">週に達成したい回数（曜日は自由）</div>
+      <button class="cta" id="addBtn">追加する</button>
+    </div>
+  </section>
+
+  <!-- ===== CALENDAR ===== -->
+  <section id="view-cal" class="hide">
+    <div class="cal-head">
+      <button class="icon-btn" id="calPrev">‹</button>
+      <div class="m num" id="calMonth"></div>
+      <button class="icon-btn" id="calNext">›</button>
+    </div>
+    <div class="cal-grid" id="calWd"></div>
+    <div class="cal-grid" id="calGrid" style="margin-top:5px"></div>
+    <div class="sec-title" id="calSelTitle">日付を選ぶと、その日のタスクが出ます</div>
+    <ul class="tasks" id="calList"></ul>
+  </section>
+
+  <!-- ===== SETTINGS ===== -->
+  <section id="view-set" class="hide">
+    <div class="sec-title">記録</div>
+    <div class="panel">
+      <div class="kv"><span class="k">🔥 連続日数</span><span class="v num" id="setStreak">0</span></div>
+      <div class="kv"><span class="k">🏆 最長連続</span><span class="v num" id="setBest">0</span></div>
+      <div class="kv"><span class="k">⭐ 継続ポイント</span><span class="v num" id="setPoints">0</span></div>
+      <div class="kv"><span class="k">✓ 累計達成</span><span class="v num" id="setTotal">0</span></div>
+    </div>
+
+    <div class="sec-title">ロックの強さ</div>
+    <div class="panel">
+      <p>達成率に合わせて厳しさを選べます。続けられている人ほど緩めてOK。</p>
+      <div class="guard" id="guardPick">
+        <button data-g="1">ハード<br>即ロック</button>
+        <button data-g="2" class="on">標準<br>締切でロック</button>
+        <button data-g="3">ゆるめ<br>通知のみ</button>
+      </div>
+    </div>
+
+    <div class="sec-title">事前通知</div>
+    <div class="panel">
+      <p>締切の何分前に知らせるか。複数選べます。</p>
+      <div class="seg" id="notifyPreset">
+        <button data-n="5">5分前</button><button data-n="10" class="on">10分前</button>
+        <button data-n="30">30分前</button><button data-n="60">1時間前</button>
+      </div>
+      <div class="row" style="align-items:center;gap:8px">
+        <input type="number" id="notifyCustom" placeholder="自由入力（分）" min="1" max="1440" style="flex:2" />
+        <button class="mini" id="notifyAdd" style="flex:1">追加</button>
+      </div>
+      <div class="hint" id="notifyList"></div>
+      <button class="mini" id="notifyPerm" style="width:100%;margin-top:10px">端末の通知を許可する</button>
+    </div>
+
+    <div class="sec-title">データ</div>
+    <div class="panel">
+      <p>すべての記録はこの端末にだけ保存されます。</p>
+      <button class="mini" id="resetBtn" style="width:100%;color:var(--danger);border-color:rgba(255,77,77,.4)">記録をすべて消す</button>
+    </div>
+  </section>
+</div>
+
+<!-- ===== LOCK OVERLAY ===== -->
+<div class="lock" id="lock">
+  <div class="lk-flame" id="lockFlame"></div>
+  <div class="lk-tag">TIME LOCKED</div>
+  <div class="lk-title">締切です</div>
+  <div class="lk-task" id="lockTask">—</div>
+  <div class="lk-time num" id="lockTime"></div>
+  <div class="lk-actions">
+    <button class="done-btn" id="lockDone">達成した ✓</button>
+    <div class="delay-row">
+      <button data-min="15" class="delayBtn">+15分</button>
+      <button data-min="30" class="delayBtn">+30分</button>
+      <button data-min="60" class="delayBtn">+60分</button>
+    </div>
+    <div class="lk-note" id="lockNote"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= flame svg ================= */
+function flameSVG(){
+  return '<svg viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg">'
+    +'<defs><linearGradient id="fg" x1="0" y1="1" x2="0" y2="0">'
+    +'<stop offset="0" stop-color="#c53a00"/><stop offset="45%" stop-color="#ff6a1f"/>'
+    +'<stop offset="100%" stop-color="#ffd15a"/></linearGradient></defs>'
+    +'<path fill="url(#fg)" d="M52 3 C 64 30 88 48 74 82 C 70 96 62 100 62 108 '
+    +'C 80 100 86 78 81 60 C 95 80 90 112 64 124 C 54 128 44 128 34 123 '
+    +'C 9 111 8 74 26 54 C 22 74 31 92 43 100 C 40 87 33 80 39 62 C 44 44 54 34 52 3 Z"/>'
+    +'<path fill="#ffe08a" opacity=".85" d="M52 62 C 60 74 60 88 51 100 C 44 92 43 82 47 74 C 43 80 42 90 46 98 C 38 92 37 78 45 68 C 48 66 50 64 52 62 Z"/>'
+    +'</svg>';
+}
+
+/* ================= state ================= */
+const KEY="tasklock_v2";
+const DEFAULT={tasks:[],points:0,total:0,guard:2,notify:[10],best:0,
+  delay:{date:"",count:0},lastSeen:""};
+let S=load();
+
+function load(){
+  try{const r=JSON.parse(localStorage.getItem(KEY));if(r&&r.tasks)return Object.assign({},DEFAULT,r);}catch(e){}
+  return JSON.parse(JSON.stringify(DEFAULT));
+}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+
+/* ================= date utils ================= */
+function ds(d){const x=d||new Date();return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0");}
+function today(){return ds(new Date());}
+function addDays(str,n){const p=str.split("-");const d=new Date(+p[0],+p[1]-1,+p[2]);d.setDate(d.getDate()+n);return ds(d);}
+function weekdayOf(str){const p=str.split("-");return new Date(+p[0],+p[1]-1,+p[2]).getDay();}
+function weekStart(str){const wd=weekdayOf(str);const back=(wd+6)%7;/*Mon start*/return addDays(str,-back);}
+function nowHM(){const n=new Date();return n.getHours()*60+n.getMinutes();}
+function hm2min(t){const p=t.split(":");return (+p[0])*60+(+p[1]);}
+
+/* ================= task logic ================= */
+function dueOn(t,dateStr){
+  if(t.type==="once")return t.date===dateStr;
+  if(t.type==="daily")return dateStr>=t.createdAt;
+  if(t.type==="week")return dateStr>=t.createdAt && t.days.includes(weekdayOf(dateStr));
+  if(t.type==="count"){
+    if(dateStr<t.createdAt)return false;
+    // due until weekly count met
+    const ws=weekStart(dateStr);
+    let doneThisWeek=0;
+    for(let i=0;i<7;i++){const d=addDays(ws,i);if(t.done&&t.done[d])doneThisWeek++;}
+    return doneThisWeek < t.count || (t.done&&t.done[dateStr]);
+  }
+  return false;
+}
+function isDone(t,dateStr){return !!(t.done&&t.done[dateStr]);}
+function tasksDue(dateStr){return S.tasks.filter(t=>dueOn(t,dateStr));}
+
+function typeLabel(t){
+  if(t.type==="once")return "単発";
+  if(t.type==="daily")return "毎日";
+  if(t.type==="week"){const N=["日","月","火","水","木","金","土"];return t.days.slice().sort().map(d=>N[d]).join("");}
+  if(t.type==="count"){const ws=weekStart(today());let c=0;for(let i=0;i<7;i++){if(t.done&&t.done[addDays(ws,i)])c++;}return "週"+t.count+"回 ("+c+"/"+t.count+")";}
+  return "";
+}
+
+/* ---- streak = consecutive days (up to today) with >=1 completion ---- */
+function completedOn(dateStr){return S.tasks.some(t=>isDone(t,dateStr));}
+function calcStreak(){
+  let day=today();
+  if(!completedOn(day))day=addDays(day,-1); // today not done yet -> count up to yesterday
+  let n=0;
+  while(completedOn(day)){n++;day=addDays(day,-1);if(n>3650)break;}
+  return n;
+}
+function streakAtRisk(){return calcStreak()>0 && !completedOn(today());}
+
+function fireStage(s){
+  if(s<=0)return 0; if(s<3)return 1; if(s<7)return 2; if(s<14)return 3; if(s<30)return 4; return 5;
+}
+function fireLabel(s){
+  const st=fireStage(s);
+  return ["火が消えている","小さな火がついた","火が育ってきた","力強い炎","大きな炎","燃え盛る炎"][st];
+}
+
+/* ================= complete / toggle ================= */
+function toggle(t,dateStr){
+  if(!t.done)t.done={};
+  const was=isDone(t,dateStr);
+  if(was){delete t.done[dateStr];}
+  else{
+    t.done[dateStr]=true;
+    S.points+=10; S.total+=1;
+    hideLockIfClear();
+    burstToast("達成！ +10pt");
+  }
+  const st=calcStreak(); if(st>S.best)S.best=st;
+  save();renderAll();
+}
+
+/* ================= add ================= */
+let addType="once", pickDays=[];
+function addTask(){
+  const text=document.getElementById("addText").value.trim();
+  const time=document.getElementById("addTime").value||"21:00";
+  if(!text){burstToast("やることを入力してね");return;}
+  const t={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),
+    text,time,type:addType,createdAt:today(),done:{}};
+  if(addType==="once")t.date=today();
+  if(addType==="week"){if(!pickDays.length){burstToast("曜日を選んでね");return;}t.days=pickDays.slice();}
+  if(addType==="count"){t.count=Math.max(1,Math.min(7,+document.getElementById("addCount").value||3));}
+  S.tasks.push(t);save();
+  document.getElementById("addText").value="";
+  burstToast("追加した");
+  renderAll();
+}
+
+/* ================= delete (2-step) ================= */
+let delArm=null;
+function delTask(t,btn){
+  if(delArm===t.id){S.tasks=S.tasks.filter(x=>x.id!==t.id);delArm=null;save();renderAll();burstToast("削除した");}
+  else{delArm=t.id;btn.textContent="🗑?";btn.style.color="var(--danger)";
+    setTimeout(()=>{if(delArm===t.id){delArm=null;renderAll();}},2500);}
+}
+
+/* ================= render ================= */
+function taskLI(t,dateStr,over){
+  const li=document.createElement("li");
+  li.className="task"+(isDone(t,dateStr)?" done":"")+(over?" overdue":"");
+  const chk=document.createElement("button");chk.className="check";chk.textContent="✓";
+  chk.onclick=()=>toggle(t,dateStr);
+  const body=document.createElement("div");body.className="t-body";
+  body.innerHTML='<div class="t-name"></div><div class="t-meta">'
+    +'<span class="tm-time">'+t.time+'</span>'
+    +'<span class="badge">'+typeLabel(t)+'</span>'
+    +(over?'<span class="badge" style="color:var(--danger);border-color:rgba(255,77,77,.4)">締切超過</span>':'')
+    +'</div>';
+  body.querySelector(".t-name").textContent=t.text;
+  const del=document.createElement("button");del.className="t-del";del.textContent="×";
+  del.onclick=()=>delTask(t,del);
+  li.append(chk,body,del);
+  return li;
+}
+
+function renderToday(){
+  const list=document.getElementById("todayList");list.innerHTML="";
+  const day=today();
+  const due=tasksDue(day).sort((a,b)=>hm2min(a.time)-hm2min(b.time));
+  if(!due.length){list.innerHTML='<div class="empty">今日のタスクはまだありません。下から追加できます。</div>';return;}
+  const nm=nowHM();
+  due.forEach(t=>{
+    const over=!isDone(t,day)&&hm2min(t.time)<nm;
+    list.appendChild(taskLI(t,day,over));
+  });
+}
+
+function renderFire(){
+  const s=calcStreak();
+  document.getElementById("streakDays").textContent=s;
+  const flame=document.getElementById("flame");
+  flame.innerHTML=flameSVG();
+  const st=fireStage(s);
+  const scale=[0.55,0.72,0.85,1,1.12,1.25][st];
+  flame.querySelector("svg").style.transform="scale("+scale+")";
+  flame.classList.toggle("dead",st===0);
+  const sub=document.getElementById("fireSub");
+  if(streakAtRisk())sub.innerHTML='<span class="risk">今日まだ未達成。火が消える前に達成しよう</span>';
+  else if(s===0)sub.textContent="今日タスクを達成して火をつけよう";
+  else sub.innerHTML=fireLabel(s)+'　⭐<b>'+S.points+'</b>pt';
+}
+
+function renderSettings(){
+  document.getElementById("setStreak").textContent=calcStreak();
+  document.getElementById("setBest").textContent=S.best;
+  document.getElementById("setPoints").textContent=S.points;
+  document.getElementById("setTotal").textContent=S.total;
+  document.querySelectorAll("#guardPick button").forEach(b=>b.classList.toggle("on",+b.dataset.g===S.guard));
+  document.querySelectorAll("#notifyPreset button").forEach(b=>b.classList.toggle("on",S.notify.includes(+b.dataset.n)));
+  document.getElementById("notifyList").textContent = S.notify.length?("通知: "+S.notify.slice().sort((a,b)=>a-b).map(n=>n+"分前").join(" / ")):"通知オフ";
+}
+
+/* ---- calendar ---- */
+let calY,calM,calSel=null;
+function renderCal(){
+  const wd=document.getElementById("calWd");wd.innerHTML="";
+  ["月","火","水","木","金","土","日"].forEach(w=>{const e=document.createElement("div");e.className="wd";e.textContent=w;wd.appendChild(e);});
+  document.getElementById("calMonth").textContent=calY+" / "+String(calM+1).padStart(2,"0");
+  const grid=document.getElementById("calGrid");grid.innerHTML="";
+  const first=new Date(calY,calM,1);
+  let lead=(first.getDay()+6)%7; // Mon start
+  const days=new Date(calY,calM+1,0).getDate();
+  for(let i=0;i<lead;i++){const c=document.createElement("div");c.className="cell pad";grid.appendChild(c);}
+  for(let d=1;d<=days;d++){
+    const dstr=calY+"-"+String(calM+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+    const c=document.createElement("div");c.className="cell";c.textContent=d;
+    if(dstr===today())c.classList.add("today");
+    if(dstr===calSel)c.classList.add("sel");
+    const due=tasksDue(dstr);
+    if(due.length){
+      const done=due.filter(t=>isDone(t,dstr)).length;
+      if(done>0){c.classList.add("sat");const dot=document.createElement("div");
+        dot.className="dot "+(done>=due.length?"full":"part");c.appendChild(dot);}
+    }
+    c.onclick=()=>{calSel=dstr;renderCal();renderCalList();};
+    grid.appendChild(c);
+  }
+}
+function renderCalList(){
+  const t=document.getElementById("calSelTitle");const list=document.getElementById("calList");list.innerHTML="";
+  if(!calSel){t.textContent="日付を選ぶと、その日のタスクが出ます";return;}
+  t.textContent=calSel+" のタスク";
+  const due=tasksDue(calSel).sort((a,b)=>hm2min(a.time)-hm2min(b.time));
+  if(!due.length){list.innerHTML='<div class="empty">この日のタスクはありません</div>';return;}
+  due.forEach(x=>list.appendChild(taskLI(x,calSel,false)));
+}
+
+function renderAll(){renderToday();renderFire();renderSettings();renderCal();renderCalList();updateLock();}
+
+/* ================= lock ================= */
+let lockTaskRef=null;
+function overdueTasks(){
+  const day=today();const nm=nowHM();
+  return tasksDue(day).filter(t=>!isDone(t,day)&&hm2min(t.time)<=nm)
+    .sort((a,b)=>hm2min(a.time)-hm2min(b.time));
+}
+function updateLock(){
+  if(S.guard===3){hideLock();return;} // ゆるめ = 通知のみ
+  const od=overdueTasks();
+  if(od.length){showLock(od[0]);}else{hideLock();}
+}
+function showLock(t){
+  if(lockTaskRef===t.id && document.getElementById("lock").classList.contains("show"))return;
+  lockTaskRef=t.id;
+  document.getElementById("lockFlame").innerHTML=flameSVG();
+  document.getElementById("lockTask").textContent=t.text;
+  document.getElementById("lockTime").textContent="締切 "+t.time+" を過ぎています";
+  const note=document.getElementById("lockNote");
+  const dl=delayState();
+  if(dl.count===0)note.innerHTML='後ろ倒しは<b>1日1回まで無料</b>';
+  else note.innerHTML='本日の無料分は使用済み。<b>広告を見る</b>か<b>'+DELAY_PTS+'ptで免除</b>';
+  document.getElementById("lock").classList.add("show");
+  beep();
+}
+function hideLock(){document.getElementById("lock").classList.remove("show");lockTaskRef=null;}
+function hideLockIfClear(){if(!overdueTasks().length)hideLock();else updateLock();}
+
+const DELAY_PTS=50;
+function delayState(){if(S.delay.date!==today())S.delay={date:today(),count:0};return S.delay;}
+function doDelay(min){
+  const t=S.tasks.find(x=>x.id===lockTaskRef);if(!t)return;
+  const dl=delayState();
+  const proceed=(reason)=>{
+    // push deadline forward
+    const nm=Math.min(23*60+59, hm2min(t.time)+min);
+    t.time=String(Math.floor(nm/60)).padStart(2,"0")+":"+String(nm%60).padStart(2,"0");
+    dl.count++;save();
+    burstToast("後ろ倒し +"+min+"分"+(reason?"（"+reason+"）":""));
+    renderAll();
+  };
+  if(dl.count===0){proceed("無料");return;}
+  // 2回目以降
+  if(S.points>=DELAY_PTS){
+    if(confirm(DELAY_PTS+"ptを使って広告なしで後ろ倒ししますか？")){S.points-=DELAY_PTS;proceed("ptで免除");return;}
+  }
+  // 広告（ダミー）
+  showAd(()=>proceed("広告視聴"));
+}
+function showAd(cb){
+  burstToast("広告を再生中…");
+  // ダミー広告：実装時はここをAdMob等に差し替え
+  setTimeout(()=>{burstToast("広告おわり");cb();},1500);
+}
+
+/* ---- beep (WebAudio) ---- */
+let AC=null;
+function beep(){
+  try{
+    AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+    if(AC.state==="suspended")AC.resume();
+    [0,0.28].forEach(off=>{
+      const o=AC.createOscillator(),g=AC.createGain();
+      o.type="square";o.frequency.value=880;
+      o.connect(g);g.connect(AC.destination);
+      const t0=AC.currentTime+off;
+      g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(0.12,t0+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
+      o.start(t0);o.stop(t0+0.24);
+    });
+  }catch(e){}
+}
+
+/* ================= toast ================= */
+let toastT=null;
+function burstToast(msg){const el=document.getElementById("toast");el.textContent=msg;el.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove("show"),1600);}
+
+/* ================= notifications ================= */
+function requestPerm(){
+  if(!("Notification"in window)){burstToast("この端末は通知に非対応");return;}
+  Notification.requestPermission().then(p=>burstToast(p==="granted"?"通知を許可しました":"通知は許可されませんでした"));
+}
+let notified={};
+function checkNotify(){
+  if(!("Notification"in window)||Notification.permission!=="granted")return;
+  const day=today();const nm=nowHM();
+  tasksDue(day).forEach(t=>{
+    if(isDone(t,day))return;
+    S.notify.forEach(mins=>{
+      const at=hm2min(t.time)-mins;
+      const key=day+"_"+t.id+"_"+mins;
+      if(nm>=at && nm<at+1 && !notified[key]){
+        notified[key]=true;
+        try{new Notification("TASKLOCK",{body:t.text+" が "+mins+"分後（"+t.time+"）に締切です"});}catch(e){}
+      }
+    });
+  });
+}
+
+/* ================= tabs ================= */
+function showTab(name){
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));
+  document.getElementById("view-today").classList.toggle("hide",name!=="today");
+  document.getElementById("view-cal").classList.toggle("hide",name!=="cal");
+  document.getElementById("view-set").classList.toggle("hide",name!=="set");
+}
+
+/* ================= wire up ================= */
+function init(){
+  // day rollover handling
+  if(S.lastSeen && S.lastSeen!==today()){notified={};}
+  S.lastSeen=today();save();
+
+  // type segment
+  document.querySelectorAll("#typeSeg button").forEach(b=>{
+    b.onclick=()=>{addType=b.dataset.type;
+      document.querySelectorAll("#typeSeg button").forEach(x=>x.classList.toggle("on",x===b));
+      document.getElementById("daysPick").classList.toggle("hide",addType!=="week");
+      document.getElementById("countPick").classList.toggle("hide",addType!=="count");
+      document.getElementById("countHint").classList.toggle("hide",addType!=="count");
+    };
+  });
+  document.querySelectorAll("#daysPick button").forEach(b=>{
+    b.onclick=()=>{const d=+b.dataset.d;if(pickDays.includes(d))pickDays=pickDays.filter(x=>x!==d);else pickDays.push(d);
+      b.classList.toggle("on");};
+  });
+  document.getElementById("addBtn").onclick=addTask;
+  document.getElementById("addText").addEventListener("keydown",e=>{if(e.key==="Enter")addTask();});
+
+  // tabs
+  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+  document.getElementById("tabCalBtn").onclick=()=>showTab("cal");
+  document.getElementById("tabSetBtn").onclick=()=>showTab("set");
+
+  // calendar nav
+  const n=new Date();calY=n.getFullYear();calM=n.getMonth();
+  document.getElementById("calPrev").onclick=()=>{calM--;if(calM<0){calM=11;calY--;}renderCal();};
+  document.getElementById("calNext").onclick=()=>{calM++;if(calM>11){calM=0;calY++;}renderCal();};
+
+  // guard
+  document.querySelectorAll("#guardPick button").forEach(b=>b.onclick=()=>{S.guard=+b.dataset.g;save();renderSettings();updateLock();burstToast("ロック強さを変更");});
+
+  // notify presets
+  document.querySelectorAll("#notifyPreset button").forEach(b=>b.onclick=()=>{
+    const v=+b.dataset.n;if(S.notify.includes(v))S.notify=S.notify.filter(x=>x!==v);else S.notify.push(v);
+    save();renderSettings();});
+  document.getElementById("notifyAdd").onclick=()=>{
+    const v=+document.getElementById("notifyCustom").value;
+    if(v>0&&!S.notify.includes(v)){S.notify.push(v);save();renderSettings();document.getElementById("notifyCustom").value="";burstToast(v+"分前を追加");}
+  };
+  document.getElementById("notifyPerm").onclick=requestPerm;
+
+  // reset
+  document.getElementById("resetBtn").onclick=()=>{
+    if(confirm("すべての記録を消します。元に戻せません。よろしいですか？")){
+      S=JSON.parse(JSON.stringify(DEFAULT));S.lastSeen=today();save();renderAll();showTab("today");burstToast("リセットしました");}
+  };
+
+  // lock actions
+  document.getElementById("lockDone").onclick=()=>{const t=S.tasks.find(x=>x.id===lockTaskRef);if(t){toggle(t,today());}};
+  document.querySelectorAll(".delayBtn").forEach(b=>b.onclick=()=>doDelay(+b.dataset.min));
+
+  renderAll();
+  setInterval(()=>{updateLock();checkNotify();},15000);
+}
+document.addEventListener("DOMContentLoaded",init);
+</script>
+</body>
+</html>
