@@ -151,6 +151,8 @@
   .guard button{flex:1;background:var(--bg2);border:1px solid var(--line);color:var(--mut);
     padding:10px 4px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;line-height:1.3}
   .guard button.on{background:rgba(255,106,31,.14);border-color:var(--fire);color:var(--fire-lt)}
+  .guard button.locked{opacity:.5;cursor:not-allowed}
+  .guard button .req{display:block;margin-top:4px;font-size:9.5px;color:var(--dim);font-weight:700;letter-spacing:0}
   .kv{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
   .kv:first-of-type{border-top:none}
   .kv .k{font-size:13px}
@@ -186,6 +188,44 @@
     border-radius:12px;font-size:13px;font-weight:700;opacity:0;transition:.25s;z-index:120;pointer-events:none;
     box-shadow:0 10px 30px rgba(0,0,0,.5)}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ---------- edit button + modal ---------- */
+  .t-edit{background:transparent;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:4px;line-height:1}
+  .t-edit:hover{color:var(--fire-lt)}
+  .modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:20px;
+    background:rgba(6,6,9,.72)}
+  .modal.show{display:flex}
+  .modal-card{width:100%;max-width:460px;background:var(--surf);border:1px solid var(--line2);border-radius:16px;padding:16px;
+    box-shadow:0 20px 60px rgba(0,0,0,.6)}
+  .modal-card h3{margin:0 0 12px;font-size:16px}
+  .modal-card input[type=text],.modal-card input[type=time],.modal-card input[type=number]{
+    width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--ink);
+    border-radius:10px;padding:11px 12px;font-size:15px;font-family:inherit;outline:none}
+  .modal-card input:focus{border-color:var(--fire)}
+  .modal-actions{display:flex;gap:8px;margin-top:14px}
+  .modal-actions button{flex:1;border-radius:11px;padding:12px;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit}
+  .btn-save{background:linear-gradient(180deg,var(--fire),var(--fire-dp));border:none;color:#fff}
+  .btn-cancel{background:var(--bg2);border:1px solid var(--line);color:var(--mut)}
+
+  /* ---------- fire effects ---------- */
+  @keyframes fireFlash{0%{filter:drop-shadow(0 0 10px rgba(255,106,31,.55))}
+    30%{filter:drop-shadow(0 0 28px rgba(255,190,90,1)) brightness(1.6)}
+    100%{filter:drop-shadow(0 0 10px rgba(255,106,31,.55))}}
+  .flame.burst{animation:fireFlash .55s ease}
+  @keyframes flicker{0%,100%{opacity:1}20%{opacity:.45}45%{opacity:.85}65%{opacity:.3}82%{opacity:.7}}
+  .flame.warn{animation:flicker 1.1s infinite}
+  .spark{position:fixed;width:7px;height:7px;border-radius:50%;
+    background:radial-gradient(circle,#ffe08a 0%,#ff6a1f 70%,transparent 100%);
+    pointer-events:none;z-index:125}
+  @keyframes sparkUp{0%{transform:translate(0,0) scale(1);opacity:1}
+    100%{transform:translate(var(--dx),-70px) scale(.2);opacity:0}}
+  .milestone{position:fixed;left:50%;top:24%;transform:translateX(-50%) scale(.8);z-index:130;pointer-events:none;
+    background:linear-gradient(180deg,var(--fire),var(--fire-dp));color:#fff;
+    padding:16px 30px;border-radius:16px;text-align:center;opacity:0;transition:.35s cubic-bezier(.2,1.4,.4,1);
+    box-shadow:0 14px 44px rgba(255,106,31,.55)}
+  .milestone.show{opacity:1;transform:translateX(-50%) scale(1)}
+  .milestone .big{font-family:"Oswald";font-weight:700;font-size:38px;display:block;line-height:1}
+  .milestone .lbl{font-size:13px;letter-spacing:.12em;font-weight:700}
 
   .hide{display:none!important}
 </style>
@@ -269,12 +309,13 @@
 
     <div class="sec-title">ロックの強さ</div>
     <div class="panel">
-      <p>達成率に合わせて厳しさを選べます。続けられている人ほど緩めてOK。</p>
+      <p>直近14日の達成率で、ゆるいレベルが解放されます（サボると自動で厳しくなる）。</p>
       <div class="guard" id="guardPick">
         <button data-g="1">ハード<br>即ロック</button>
         <button data-g="2" class="on">標準<br>締切でロック</button>
         <button data-g="3">ゆるめ<br>通知のみ</button>
       </div>
+      <div class="hint" id="guardRate"></div>
     </div>
 
     <div class="sec-title">事前通知</div>
@@ -308,9 +349,17 @@
       <button class="mini" id="soundTest" style="width:100%;margin-top:10px">🔊 試聴</button>
     </div>
 
+    <div class="sec-title">バックアップ</div>
+    <div class="panel">
+      <p>記録はこの端末にだけ保存されます。機種変更やブラウザ履歴の削除で消えるので、時々書き出して保管してください。</p>
+      <button class="mini" id="exportBtn" style="width:100%">💾 バックアップを書き出す</button>
+      <button class="mini" id="importBtn" style="width:100%;margin-top:8px">📂 バックアップから復元</button>
+      <input type="file" id="importFile" accept="application/json,.json" style="display:none" />
+    </div>
+
     <div class="sec-title">データ</div>
     <div class="panel">
-      <p>すべての記録はこの端末にだけ保存されます。</p>
+      <p>すべての記録を消して初期状態に戻します。</p>
       <button class="mini" id="resetBtn" style="width:100%;color:var(--danger);border-color:rgba(255,77,77,.4)">記録をすべて消す</button>
     </div>
   </section>
@@ -334,6 +383,29 @@
   </div>
 </div>
 
+<!-- ===== EDIT MODAL ===== -->
+<div class="modal" id="editModal">
+  <div class="modal-card">
+    <h3>タスクを編集</h3>
+    <input type="text" id="editText" placeholder="やること" maxlength="40" />
+    <div class="row"><input type="time" id="editTime" /></div>
+    <div class="seg" id="editTypeSeg">
+      <button data-type="once">単発</button><button data-type="daily">毎日</button>
+      <button data-type="week">曜日</button><button data-type="count">週◯回</button>
+    </div>
+    <div class="days hide" id="editDays">
+      <button data-d="1">月</button><button data-d="2">火</button><button data-d="3">水</button>
+      <button data-d="4">木</button><button data-d="5">金</button><button data-d="6">土</button><button data-d="0">日</button>
+    </div>
+    <div class="row hide" id="editCountRow"><input type="number" id="editCount" value="3" min="1" max="7" /></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="editCancel">キャンセル</button>
+      <button class="btn-save" id="editSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="milestone" id="milestone"></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -352,7 +424,7 @@ function flameSVG(){
 
 /* ================= state ================= */
 const KEY="tasklock_v2";
-const DEFAULT={tasks:[],points:0,total:0,guard:2,notify:[10],best:0,
+const DEFAULT={tasks:[],points:0,total:0,guard:2,notify:[10],best:0,celebrated:0,
   sound:"pipi",volume:70,delay:{date:"",count:0},lastSeen:""};
 let S=load();
 
@@ -420,12 +492,54 @@ function calcStreak(){
 }
 function streakAtRisk(){return calcStreak()>0 && !completedOn(today());}
 
+/* ---- 達成率でロック強さを解放（直近14日、今日は除く） ---- */
+function achieveStats(){
+  let due=0,done=0,dueDays=0;
+  for(let i=1;i<=14;i++){
+    const d=addDays(today(),-i);
+    const dd=tasksDue(d);
+    if(!dd.length)continue;
+    dueDays++;due+=dd.length;done+=dd.filter(t=>isDone(t,d)).length;
+  }
+  return {rate:due?done/due:null,dueDays};
+}
+function maxGuard(){
+  const {rate,dueDays}=achieveStats();
+  if(rate===null)return 2;              // 履歴なし＝標準まで
+  if(rate>=0.8 && dueDays>=5)return 3;  // ゆるめ解放
+  if(rate>=0.5)return 2;                // 標準解放
+  return 1;                             // ハード固定
+}
+
 function fireStage(s){
   if(s<=0)return 0; if(s<3)return 1; if(s<7)return 2; if(s<14)return 3; if(s<30)return 4; return 5;
 }
 function fireLabel(s){
   const st=fireStage(s);
   return ["火が消えている","小さな火がついた","火が育ってきた","力強い炎","大きな炎","燃え盛る炎"][st];
+}
+const MILESTONES=[3,7,14,30,60,100,200,365];
+function fireBurst(){
+  const flame=document.getElementById("flame");if(!flame)return;
+  flame.classList.remove("burst");void flame.offsetWidth;flame.classList.add("burst");
+  const r=flame.getBoundingClientRect();
+  const n=8+Math.floor(Math.random()*4);
+  for(let i=0;i<n;i++){
+    const s=document.createElement("div");s.className="spark";
+    s.style.left=(r.left+r.width/2-3)+"px";
+    s.style.top=(r.top+r.height*0.4)+"px";
+    s.style.setProperty("--dx",(Math.random()*90-45)+"px");
+    s.style.animation="sparkUp "+(0.6+Math.random()*0.5).toFixed(2)+"s ease-out forwards";
+    document.body.appendChild(s);
+    setTimeout(()=>s.remove(),1300);
+  }
+}
+function celebrate(days){
+  const el=document.getElementById("milestone");
+  el.innerHTML='<span class="big num">'+days+'</span><span class="lbl">日連続 達成！</span>';
+  el.classList.remove("show");void el.offsetWidth;el.classList.add("show");
+  fireBurst();setTimeout(fireBurst,220);
+  setTimeout(()=>el.classList.remove("show"),1900);
 }
 
 /* ================= complete / toggle ================= */
@@ -440,6 +554,11 @@ function toggle(t,dateStr){
     burstToast("達成！ +10pt");
   }
   const st=calcStreak(); if(st>S.best)S.best=st;
+  if(!was && dateStr===today()){
+    const hit=MILESTONES.includes(st) && (S.celebrated||0)<st;
+    if(hit){S.celebrated=st;save();renderAll();celebrate(st);return;}
+    save();renderAll();fireBurst();return;
+  }
   save();renderAll();
 }
 
@@ -483,9 +602,11 @@ function taskLI(t,dateStr,over){
     +(over?'<span class="badge" style="color:var(--danger);border-color:rgba(255,77,77,.4)">締切超過</span>':'')
     +'</div>';
   body.querySelector(".t-name").textContent=t.text;
+  const edit=document.createElement("button");edit.className="t-edit";edit.textContent="✎";
+  edit.onclick=()=>openEdit(t);
   const del=document.createElement("button");del.className="t-del";del.textContent="×";
   del.onclick=()=>delTask(t,del);
-  li.append(chk,body,del);
+  li.append(chk,body,edit,del);
   return li;
 }
 
@@ -503,6 +624,7 @@ function renderToday(){
 
 function renderFire(){
   const s=calcStreak();
+  if((S.celebrated||0)>s){S.celebrated=s;save();}
   document.getElementById("streakDays").textContent=s;
   const flame=document.getElementById("flame");
   flame.innerHTML=flameSVG();
@@ -510,8 +632,10 @@ function renderFire(){
   const scale=[0.55,0.72,0.85,1,1.12,1.25][st];
   flame.querySelector("svg").style.transform="scale("+scale+")";
   flame.classList.toggle("dead",st===0);
+  const risk=streakAtRisk();
+  flame.classList.toggle("warn",risk);
   const sub=document.getElementById("fireSub");
-  if(streakAtRisk())sub.innerHTML='<span class="risk">今日まだ未達成。火が消える前に達成しよう</span>';
+  if(risk)sub.innerHTML='<span class="risk">'+(s>=7?"🔥"+s+"日連続が今日で途切れます。今すぐ達成を！":"今日まだ未達成。火が消える前に達成しよう")+'</span>';
   else if(s===0)sub.textContent="今日タスクを達成して火をつけよう";
   else sub.innerHTML=fireLabel(s)+'　⭐<b>'+S.points+'</b>pt';
 }
@@ -521,7 +645,20 @@ function renderSettings(){
   document.getElementById("setBest").textContent=S.best;
   document.getElementById("setPoints").textContent=S.points;
   document.getElementById("setTotal").textContent=S.total;
-  document.querySelectorAll("#guardPick button").forEach(b=>b.classList.toggle("on",+b.dataset.g===S.guard));
+  const gmax=maxGuard();
+  if(S.guard>gmax){S.guard=gmax;save();}
+  const gLabel={1:"ハード<br>即ロック",2:"標準<br>締切でロック",3:"ゆるめ<br>通知のみ"};
+  const gReq={2:"達成率50%で解放",3:"達成率80%で解放"};
+  document.querySelectorAll("#guardPick button").forEach(b=>{
+    const g=+b.dataset.g, locked=g>gmax;
+    b.classList.toggle("on",g===S.guard);
+    b.classList.toggle("locked",locked);
+    b.innerHTML=gLabel[g]+(locked?'<span class="req">🔒'+gReq[g]+'</span>':'');
+  });
+  const st2=achieveStats();
+  document.getElementById("guardRate").textContent=(st2.rate===null)
+    ? "達成率：まだ記録なし（明日から集計）"
+    : "直近14日の達成率："+Math.round(st2.rate*100)+"%";
   document.querySelectorAll("#notifyPreset button").forEach(b=>b.classList.toggle("on",S.notify.includes(+b.dataset.n)));
   document.getElementById("notifyList").textContent = S.notify.length?("通知: "+S.notify.slice().sort((a,b)=>a-b).map(n=>n+"分前").join(" / ")):"通知オフ";
   document.querySelectorAll("#soundPick button").forEach(b=>b.classList.toggle("on",b.dataset.s===S.sound));
@@ -671,6 +808,65 @@ function checkNotify(){
   });
 }
 
+/* ================= edit ================= */
+let editId=null, editType="once", editDays=[];
+function syncEditFields(){
+  document.querySelectorAll("#editTypeSeg button").forEach(x=>x.classList.toggle("on",x.dataset.type===editType));
+  document.getElementById("editDays").classList.toggle("hide",editType!=="week");
+  document.getElementById("editCountRow").classList.toggle("hide",editType!=="count");
+}
+function openEdit(t){
+  editId=t.id; editType=t.type; editDays=(t.days||[]).slice();
+  document.getElementById("editText").value=t.text;
+  document.getElementById("editTime").value=t.time;
+  document.getElementById("editCount").value=t.count||3;
+  document.querySelectorAll("#editDays button").forEach(x=>x.classList.toggle("on",editDays.includes(+x.dataset.d)));
+  syncEditFields();
+  document.getElementById("editModal").classList.add("show");
+}
+function closeEdit(){document.getElementById("editModal").classList.remove("show");editId=null;}
+function saveEdit(){
+  const t=S.tasks.find(x=>x.id===editId);if(!t){closeEdit();return;}
+  const text=document.getElementById("editText").value.trim();
+  if(!text){burstToast("やることを入力してね");return;}
+  if(editType==="week" && !editDays.length){burstToast("曜日を選んでね");return;}
+  t.text=text;
+  t.time=document.getElementById("editTime").value||t.time;
+  t.type=editType;
+  if(editType==="week")t.days=editDays.slice(); else delete t.days;
+  if(editType==="count")t.count=Math.max(1,Math.min(7,+document.getElementById("editCount").value||3)); else delete t.count;
+  if(editType==="once" && !t.date)t.date=today();
+  if(t.override)delete t.override; // 時刻を編集したので当日の後ろ倒しはリセット
+  save();closeEdit();renderAll();burstToast("更新した");
+}
+
+/* ================= backup / restore ================= */
+function exportData(){
+  try{
+    const blob=new Blob([JSON.stringify(S,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download="tasklock-backup-"+today()+".json";
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},100);
+    burstToast("バックアップを書き出しました");
+  }catch(e){burstToast("書き出しに失敗しました");}
+}
+function importData(file){
+  const rd=new FileReader();
+  rd.onload=()=>{
+    let data;
+    try{data=JSON.parse(rd.result);}catch(e){burstToast("ファイルの形式が不正です");return;}
+    if(!data||!Array.isArray(data.tasks)){burstToast("バックアップファイルではないようです");return;}
+    if((S.tasks.length||S.total>0) && !confirm("今の記録を、読み込んだ内容で置き換えます。よろしいですか？"))return;
+    S=Object.assign(JSON.parse(JSON.stringify(DEFAULT)),data);
+    S.lastSeen=today();save();renderAll();showTab("today");
+    burstToast("復元しました");
+  };
+  rd.onerror=()=>burstToast("ファイルを読み込めませんでした");
+  rd.readAsText(file);
+}
+
 /* ================= tabs ================= */
 function showTab(name){
   document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));
@@ -712,7 +908,11 @@ function init(){
   document.getElementById("calNext").onclick=()=>{calM++;if(calM>11){calM=0;calY++;}renderCal();};
 
   // guard
-  document.querySelectorAll("#guardPick button").forEach(b=>b.onclick=()=>{S.guard=+b.dataset.g;save();renderSettings();updateLock();burstToast("ロック強さを変更");});
+  document.querySelectorAll("#guardPick button").forEach(b=>b.onclick=()=>{
+    const g=+b.dataset.g;
+    if(g>maxGuard()){burstToast("達成率が足りません（"+(g===3?"80%":"50%")+"で解放）");return;}
+    S.guard=g;save();renderSettings();updateLock();burstToast("ロック強さを変更");
+  });
 
   // notify presets
   document.querySelectorAll("#notifyPreset button").forEach(b=>b.onclick=()=>{
@@ -731,6 +931,17 @@ function init(){
   vr.addEventListener("input",e=>{S.volume=+e.target.value;document.getElementById("volVal").textContent=S.volume+"%";});
   vr.addEventListener("change",e=>{S.volume=+e.target.value;save();playAlert();});
   document.getElementById("soundTest").onclick=playAlert;
+
+  // backup / restore
+  document.getElementById("exportBtn").onclick=exportData;
+  document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+  document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importData(f);e.target.value="";});
+
+  // edit modal
+  document.querySelectorAll("#editTypeSeg button").forEach(b=>b.onclick=()=>{editType=b.dataset.type;syncEditFields();});
+  document.querySelectorAll("#editDays button").forEach(b=>b.onclick=()=>{const d=+b.dataset.d;if(editDays.includes(d))editDays=editDays.filter(x=>x!==d);else editDays.push(d);b.classList.toggle("on");});
+  document.getElementById("editSave").onclick=saveEdit;
+  document.getElementById("editCancel").onclick=closeEdit;
 
   // reset
   document.getElementById("resetBtn").onclick=()=>{
