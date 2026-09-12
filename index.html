@@ -227,6 +227,13 @@
   .milestone .big{font-family:"Oswald";font-weight:700;font-size:38px;display:block;line-height:1}
   .milestone .lbl{font-size:13px;letter-spacing:.12em;font-weight:700}
 
+  /* ---------- categories ---------- */
+  .cats{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .cats button{background:var(--bg2);border:1px solid var(--line);color:var(--mut);border-radius:20px;
+    padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px}
+  .cats button .cdot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .cats button.on{background:rgba(255,255,255,.05)}
+
   .hide{display:none!important}
 </style>
 </head>
@@ -280,6 +287,7 @@
         <input type="number" id="addCount" value="3" min="1" max="7" /> 
       </div>
       <div class="hint hide" id="countHint">週に達成したい回数（曜日は自由）</div>
+      <div class="cats" id="addCats"></div>
       <button class="cta" id="addBtn">追加する</button>
     </div>
   </section>
@@ -398,6 +406,7 @@
       <button data-d="4">木</button><button data-d="5">金</button><button data-d="6">土</button><button data-d="0">日</button>
     </div>
     <div class="row hide" id="editCountRow"><input type="number" id="editCount" value="3" min="1" max="7" /></div>
+    <div class="cats" id="editCats"></div>
     <div class="modal-actions">
       <button class="btn-cancel" id="editCancel">キャンセル</button>
       <button class="btn-save" id="editSave">保存</button>
@@ -563,20 +572,45 @@ function toggle(t,dateStr){
 }
 
 /* ================= add ================= */
-let addType="once", pickDays=[];
+let addType="once", pickDays=[], addCat="";
+const CATS=[
+  {id:"work",name:"仕事",color:"#4a90e2"},
+  {id:"study",name:"勉強",color:"#9b6dff"},
+  {id:"health",name:"健康",color:"#37c46e"},
+  {id:"life",name:"生活",color:"#22b8cf"},
+  {id:"other",name:"その他",color:"#ff5c8a"}
+];
+function catOf(id){return CATS.find(c=>c.id===id)||null;}
+function buildCatChips(containerId,onPick){
+  const c=document.getElementById(containerId);if(!c)return;c.innerHTML="";
+  const mk=(id,name,color)=>{const btn=document.createElement("button");btn.dataset.cat=id||"";
+    btn.innerHTML=(color?'<span class="cdot" style="background:'+color+'"></span>':'')+name;
+    btn.onclick=()=>onPick(id||"");return btn;};
+  c.appendChild(mk("","なし",null));
+  CATS.forEach(ct=>c.appendChild(mk(ct.id,ct.name,ct.color)));
+}
+function markCats(containerId,sel){
+  document.querySelectorAll("#"+containerId+" button").forEach(b=>{
+    const on=(b.dataset.cat||"")===(sel||"");b.classList.toggle("on",on);
+    const ct=catOf(b.dataset.cat);
+    b.style.borderColor=on?(ct?ct.color:"var(--fire-lt)"):"";
+    b.style.color=on?(ct?ct.color:"var(--ink)"):"";
+  });
+}
 function addTask(){
   const text=document.getElementById("addText").value.trim();
   const time=document.getElementById("addTime").value||"21:00";
   if(!text){burstToast("やることを入力してね");return;}
   const t={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),
-    text,time,type:addType,createdAt:today(),done:{}};
+    text,time,type:addType,cat:addCat,createdAt:today(),done:{}};
   if(addType==="once")t.date=today();
   if(addType==="week"){if(!pickDays.length){burstToast("曜日を選んでね");return;}t.days=pickDays.slice();}
   if(addType==="count"){t.count=Math.max(1,Math.min(7,+document.getElementById("addCount").value||3));}
   S.tasks.push(t);save();
   document.getElementById("addText").value="";
-  pickDays=[];
+  pickDays=[]; addCat="";
   document.querySelectorAll("#daysPick button").forEach(b=>b.classList.remove("on"));
+  markCats("addCats","");
   burstToast("追加した");
   renderAll();
 }
@@ -595,10 +629,13 @@ function taskLI(t,dateStr,over){
   li.className="task"+(isDone(t,dateStr)?" done":"")+(over?" overdue":"");
   const chk=document.createElement("button");chk.className="check";chk.textContent="✓";
   chk.onclick=()=>toggle(t,dateStr);
+  const ct=catOf(t.cat);
+  if(ct)li.style.borderLeft="3px solid "+ct.color;
   const body=document.createElement("div");body.className="t-body";
   body.innerHTML='<div class="t-name"></div><div class="t-meta">'
     +'<span class="tm-time">'+effTime(t,dateStr)+'</span>'
     +'<span class="badge">'+typeLabel(t)+'</span>'
+    +(ct?'<span class="badge" style="color:'+ct.color+';border-color:'+ct.color+'55">'+ct.name+'</span>':'')
     +(over?'<span class="badge" style="color:var(--danger);border-color:rgba(255,77,77,.4)">締切超過</span>':'')
     +'</div>';
   body.querySelector(".t-name").textContent=t.text;
@@ -809,24 +846,26 @@ function checkNotify(){
 }
 
 /* ================= edit ================= */
-let editId=null, editType="once", editDays=[];
+let editId=null, editType="once", editDays=[], editCat="";
 function syncEditFields(){
   document.querySelectorAll("#editTypeSeg button").forEach(x=>x.classList.toggle("on",x.dataset.type===editType));
   document.getElementById("editDays").classList.toggle("hide",editType!=="week");
   document.getElementById("editCountRow").classList.toggle("hide",editType!=="count");
 }
 function openEdit(t){
-  editId=t.id; editType=t.type; editDays=(t.days||[]).slice();
+  editId=t.id; editType=t.type; editDays=(t.days||[]).slice(); editCat=t.cat||"";
   document.getElementById("editText").value=t.text;
   document.getElementById("editTime").value=t.time;
   document.getElementById("editCount").value=t.count||3;
   document.querySelectorAll("#editDays button").forEach(x=>x.classList.toggle("on",editDays.includes(+x.dataset.d)));
+  markCats("editCats",editCat);
   syncEditFields();
   document.getElementById("editModal").classList.add("show");
 }
 function closeEdit(){document.getElementById("editModal").classList.remove("show");editId=null;}
 function saveEdit(){
   const t=S.tasks.find(x=>x.id===editId);if(!t){closeEdit();return;}
+  const oldType=t.type;
   const text=document.getElementById("editText").value.trim();
   if(!text){burstToast("やることを入力してね");return;}
   if(editType==="week" && !editDays.length){burstToast("曜日を選んでね");return;}
@@ -835,7 +874,8 @@ function saveEdit(){
   t.type=editType;
   if(editType==="week")t.days=editDays.slice(); else delete t.days;
   if(editType==="count")t.count=Math.max(1,Math.min(7,+document.getElementById("editCount").value||3)); else delete t.count;
-  if(editType==="once" && !t.date)t.date=today();
+  t.cat=editCat;
+  if(editType==="once"){ if(oldType!=="once")t.done={}; t.date=today(); } // 過去履歴で即消えないよう単発化時はリセット
   if(t.override)delete t.override; // 時刻を編集したので当日の後ろ倒しはリセット
   save();closeEdit();renderAll();burstToast("更新した");
 }
@@ -942,6 +982,11 @@ function init(){
   document.querySelectorAll("#editDays button").forEach(b=>b.onclick=()=>{const d=+b.dataset.d;if(editDays.includes(d))editDays=editDays.filter(x=>x!==d);else editDays.push(d);b.classList.toggle("on");});
   document.getElementById("editSave").onclick=saveEdit;
   document.getElementById("editCancel").onclick=closeEdit;
+
+  // categories
+  buildCatChips("addCats",id=>{addCat=id;markCats("addCats",id);});
+  buildCatChips("editCats",id=>{editCat=id;markCats("editCats",id);});
+  markCats("addCats","");
 
   // reset
   document.getElementById("resetBtn").onclick=()=>{
