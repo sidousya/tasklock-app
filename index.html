@@ -234,6 +234,15 @@
   .cats button .cdot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
   .cats button.on{background:rgba(255,255,255,.05)}
 
+  /* ---------- support ---------- */
+  .support{background:linear-gradient(180deg,rgba(255,106,31,.12),var(--surf));border:1px solid var(--fire);
+    border-radius:var(--r);padding:14px;margin-top:10px;text-align:center}
+  .support p{margin:0 0 10px;font-size:12px;color:var(--mut);line-height:1.6}
+  .support button{width:100%;background:linear-gradient(180deg,var(--fire),var(--fire-dp));border:none;color:#fff;
+    font-weight:900;font-size:14px;padding:12px;border-radius:11px;cursor:pointer;font-family:inherit;
+    box-shadow:0 6px 18px rgba(255,106,31,.28)}
+  .support button:active{transform:translateY(1px)}
+
   .hide{display:none!important}
 </style>
 </head>
@@ -365,6 +374,12 @@
       <input type="file" id="importFile" accept="application/json,.json" style="display:none" />
     </div>
 
+    <div class="sec-title hide" id="supportSec">応援</div>
+    <div class="support hide" id="supportPanel">
+      <p>個人でコツコツ開発しています。よかったら応援してもらえると、大きな励みになります。</p>
+      <button id="supportBtn">☕ noteで応援する</button>
+    </div>
+
     <div class="sec-title">データ</div>
     <div class="panel">
       <p>すべての記録を消して初期状態に戻します。</p>
@@ -433,6 +448,7 @@ function flameSVG(){
 
 /* ================= state ================= */
 const KEY="tasklock_v2";
+const SUPPORT_URL="https://note.com/zero2ichi_ai/n/n852e10231385"; // ←公開時にnote記事のURLをここに入れると「応援」ボタンが表示される
 const DEFAULT={tasks:[],points:0,total:0,guard:2,notify:[10],best:0,celebrated:0,
   sound:"pipi",volume:70,delay:{date:"",count:0},lastSeen:""};
 let S=load();
@@ -987,6 +1003,13 @@ function init(){
   buildCatChips("addCats",id=>{addCat=id;markCats("addCats",id);});
   buildCatChips("editCats",id=>{editCat=id;markCats("editCats",id);});
   markCats("addCats","");
+
+  // support (URLが入っている時だけ表示)
+  if(SUPPORT_URL){
+    document.getElementById("supportSec").classList.remove("hide");
+    document.getElementById("supportPanel").classList.remove("hide");
+    document.getElementById("supportBtn").onclick=()=>window.open(SUPPORT_URL,"_blank","noopener");
+  }
 
   // reset
   document.getElementById("resetBtn").onclick=()=>{
