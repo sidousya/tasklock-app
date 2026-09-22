@@ -843,6 +843,17 @@ function requestPerm(){
   Notification.requestPermission().then(p=>burstToast(p==="granted"?"通知を許可しました":"通知は許可されませんでした"));
 }
 let notified={};
+let lastRenderedDay=today();
+function checkDayRollover(){
+  const d=today();
+  if(d!==lastRenderedDay){
+    lastRenderedDay=d;
+    notified={};                 // 新しい日の通知を出せるようにする
+    if(S.delay.date!==d)S.delay={date:d,count:0}; // 後ろ倒し回数を当日ぶんにリセット
+    S.lastSeen=d;save();
+    renderAll();                 // 今日のタスク・炎・カレンダーを新しい日で描き直す
+  }
+}
 function checkNotify(){
   if(!("Notification"in window)||Notification.permission!=="granted")return;
   const day=today();const nm=nowHM();
@@ -1022,7 +1033,10 @@ function init(){
   document.querySelectorAll(".delayBtn").forEach(b=>b.onclick=()=>doDelay(+b.dataset.min));
 
   renderAll();
-  setInterval(()=>{updateLock();checkNotify();},15000);
+  setInterval(()=>{checkDayRollover();updateLock();checkNotify();},15000);
+  // アプリを開き直した/前面に戻した時にも日付変化を反映
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden){checkDayRollover();updateLock();}});
+  window.addEventListener("focus",()=>{checkDayRollover();updateLock();});
 }
 document.addEventListener("DOMContentLoaded",init);
 </script>
